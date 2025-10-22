@@ -18,6 +18,8 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import sessionStore from "./sessionStore.js";
+import translationManager from "./translationManager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,14 +97,19 @@ const LANGUAGE_NAMES = {
 const wss = new WebSocketServer({ noServer: true });
 
 // Create HTTP server
-const server = app.listen(port, () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`[Backend] Server running on port ${port}`);
-  console.log(`[Backend] WebSocket endpoint: ws://localhost:${port}/translate`);
+  console.log(`[Backend] Local: http://localhost:${port}`);
+  console.log(`[Backend] WebSocket: ws://localhost:${port}/translate`);
+  console.log(`[Backend] For network access, use your local IP address instead of localhost`);
 });
+
+// Import WebSocket handlers
+import { handleHostConnection, handleListenerConnection } from './websocketHandler.js';
 
 // Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/translate") {
+  if (req.url?.startsWith("/translate")) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
@@ -115,8 +122,27 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", async (clientWs, req) => {
   console.log("[Backend] New WebSocket client connected");
 
+  // Parse URL parameters
+  const url = new URL(req.url, `http://localhost:${port}`);
+  const role = url.searchParams.get('role'); // 'host' or 'listener'
+  const sessionId = url.searchParams.get('sessionId');
+  const targetLang = url.searchParams.get('targetLang');
+  const userName = decodeURIComponent(url.searchParams.get('userName') || 'Anonymous');
+
+  // Route to appropriate handler
+  if (role === 'host' && sessionId) {
+    handleHostConnection(clientWs, sessionId);
+    return;
+  } else if (role === 'listener' && sessionId) {
+    handleListenerConnection(clientWs, sessionId, targetLang || 'en', userName);
+    return;
+  }
+
+  // Fall back to legacy solo mode for backward compatibility
+  console.log("[Backend] Legacy solo mode connection");
+
   let geminiWs = null;
-  let sessionId = null;
+  let legacySessionId = null;
   let currentSourceLang = 'en';
   let currentTargetLang = 'es';
   let reconnecting = false;
@@ -569,8 +595,8 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
       }
       
       // Remove session
-      if (sessionId) {
-        activeSessions.delete(sessionId);
+      if (legacySessionId) {
+        activeSessions.delete(legacySessionId);
       }
       
       // Reset state
@@ -582,8 +608,8 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
   // Step 3: Now connect to Gemini (after client handlers are ready)
   (async () => {
     try {
-      sessionId = `session_${Date.now()}`;
-      console.log(`[Backend] Starting session: ${sessionId}`);
+      legacySessionId = `session_${Date.now()}`;
+      console.log(`[Backend] Starting legacy session: ${legacySessionId}`);
       
       // Check if API key is configured
       if (!process.env.GEMINI_API_KEY) {
@@ -591,13 +617,13 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
       }
       
       geminiWs = await connectToGemini();
-      console.log(`[Backend] Gemini connection established for session: ${sessionId}`);
+      console.log(`[Backend] Gemini connection established for session: ${legacySessionId}`);
 
       // Attach Gemini event handlers
       attachGeminiHandlers(geminiWs);
 
     // Store session for tracking
-      activeSessions.set(sessionId, {
+      activeSessions.set(legacySessionId, {
         clientWs,
         geminiWs,
         startTime: Date.now()
@@ -607,7 +633,7 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
       if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(JSON.stringify({
           type: 'session_ready',
-          sessionId: sessionId,
+          sessionId: legacySessionId,
           message: 'Translation session ready'
         }));
     }
@@ -626,12 +652,138 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
   })();
 });
 
+// ========================================
+// SESSION MANAGEMENT ENDPOINTS
+// ========================================
+
+/**
+ * POST /session/start
+ * Creates a new live translation session for a host
+ */
+app.post('/session/start', (req, res) => {
+  try {
+    const { sessionId, sessionCode } = sessionStore.createSession();
+    
+    res.json({
+      success: true,
+      sessionId,
+      sessionCode,
+      wsUrl: `/translate?role=host&sessionId=${sessionId}`
+    });
+  } catch (error) {
+    console.error('[Backend] Error creating session:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /session/join
+ * Allows a listener to join an existing session
+ */
+app.post('/session/join', (req, res) => {
+  try {
+    const { sessionCode, targetLang, userName } = req.body;
+    
+    if (!sessionCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Session code is required'
+      });
+    }
+    
+    const session = sessionStore.getSessionByCode(sessionCode);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found. Please check the code and try again.'
+      });
+    }
+    
+    if (!session.isActive) {
+      return res.status(400).json({
+        success: false,
+        error: 'Session is not active yet. The host needs to start broadcasting.'
+      });
+    }
+    
+    res.json({
+      success: true,
+      sessionId: session.sessionId,
+      sessionCode: session.sessionCode,
+      sourceLang: session.sourceLang,
+      targetLang: targetLang || 'en',
+      wsUrl: `/translate?role=listener&sessionId=${session.sessionId}&targetLang=${targetLang || 'en'}&userName=${encodeURIComponent(userName || 'Anonymous')}`
+    });
+  } catch (error) {
+    console.error('[Backend] Error joining session:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /session/:sessionCode/info
+ * Get session information
+ */
+app.get('/session/:sessionCode/info', (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    const session = sessionStore.getSessionByCode(sessionCode);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+    
+    const stats = sessionStore.getSessionStats(session.sessionId);
+    
+    res.json({
+      success: true,
+      session: stats
+    });
+  } catch (error) {
+    console.error('[Backend] Error getting session info:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /sessions
+ * Get all active sessions (for admin/debugging)
+ */
+app.get('/sessions', (req, res) => {
+  try {
+    const sessions = sessionStore.getAllSessions();
+    res.json({
+      success: true,
+      sessions
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     activeSessions: activeSessions.size,
-    model: 'gemini-1.5-flash-latest',
+    liveTranslationSessions: sessionStore.getAllSessions().length,
+    model: 'gemini-1.5-flash',
     endpoint: '/translate'
   });
 });
@@ -642,7 +794,7 @@ app.post('/test-translation', async (req, res) => {
     const { text, sourceLang, targetLang } = req.body;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

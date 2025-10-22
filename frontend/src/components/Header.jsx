@@ -48,4 +48,4 @@ function Header({ currentPage, setCurrentPage }) {
   )
 }
 
-export default Header
+export { Header }

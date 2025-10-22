@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Mic, MicOff, Volume2, VolumeX, Globe, Settings } from 'lucide-react'
-import LanguageSelector from './LanguageSelector'
+import { Mic, MicOff, Volume2, VolumeX, Globe, Settings, ArrowLeft } from 'lucide-react'
+import { LanguageSelector } from './LanguageSelector'
 import TranslationDisplay from './TranslationDisplay'
-import ConnectionStatus from './ConnectionStatus'
+import { ConnectionStatus } from './ConnectionStatus'
+import { Header } from './Header'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAudioCapture } from '../hooks/useAudioCapture'
 
@@ -61,7 +62,7 @@ const LANGUAGES = [
   { code: 'af', name: 'Afrikaans' }
 ]
 
-function TranslationInterface() {
+function TranslationInterface({ onBackToHome }) {
   const [isListening, setIsListening] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [sourceLang, setSourceLang] = useState('en')
@@ -71,13 +72,38 @@ function TranslationInterface() {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [latency, setLatency] = useState(0)
 
+  // Dynamically determine WebSocket URL based on frontend URL
+  const getWebSocketUrl = () => {
+    const hostname = window.location.hostname;
+    console.log('[TranslationInterface] Detected hostname:', hostname);
+    console.log('[TranslationInterface] Full location:', window.location.href);
+    
+    // Validate IP address format
+    const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    
+    if (hostname !== 'localhost' && !ipv4Pattern.test(hostname)) {
+      console.error('[TranslationInterface] Invalid hostname format, using localhost');
+      return 'ws://localhost:3001/translate';
+    }
+    
+    const wsUrl = `ws://${hostname}:3001/translate`;
+    console.log('[TranslationInterface] Constructed WebSocket URL:', wsUrl);
+    return wsUrl;
+  };
+
+  // Get the WebSocket URL - ensure it has /translate path
+  const websocketUrl = import.meta.env.VITE_WS_URL || getWebSocketUrl();
+  // Force /translate path if not present
+  const finalWebSocketUrl = websocketUrl.endsWith('/translate') ? websocketUrl : websocketUrl + '/translate';
+  console.log('[TranslationInterface] Final WebSocket URL being used:', finalWebSocketUrl);
+
   const { 
     connect, 
     disconnect, 
     sendMessage, 
     connectionState,
     addMessageHandler
-  } = useWebSocket('ws://localhost:3001/translate')
+  } = useWebSocket(finalWebSocketUrl)
 
   const {
     startRecording,
@@ -96,6 +122,7 @@ function TranslationInterface() {
       removeHandler()
       disconnect()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -184,12 +211,25 @@ function TranslationInterface() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-4">
-            <h2 className="text-2xl font-bold text-gray-900">Voice Translation</h2>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <Header />
+      <div className="container mx-auto px-4 py-8">
+        {onBackToHome && (
+          <button
+            onClick={onBackToHome}
+            className="mb-4 px-4 py-2 text-gray-600 hover:text-gray-800 flex items-center gap-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Home</span>
+          </button>
+        )}
+        
+        <div className="max-w-6xl mx-auto">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-4">
+                <h2 className="text-2xl font-bold text-gray-900">Voice Translation - Solo Mode</h2>
             <ConnectionStatus 
               isConnected={isConnected} 
               latency={latency}
@@ -289,6 +329,8 @@ function TranslationInterface() {
           audioEnabled={audioEnabled}
           isListening={isListening}
         />
+          </div>
+        </div>
       </div>
     </div>
   )

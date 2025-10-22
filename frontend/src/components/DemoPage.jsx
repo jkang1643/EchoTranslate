@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { Send, Volume2, Copy } from 'lucide-react'
-import LanguageSelector from './LanguageSelector'
+import { Send, Volume2, Copy, ArrowLeft } from 'lucide-react'
+import { LanguageSelector } from './LanguageSelector'
+import { Header } from './Header'
 import { useWebSocket } from '../hooks/useWebSocket'
 
 const LANGUAGES = [
@@ -10,20 +11,84 @@ const LANGUAGES = [
   { code: 'de', name: 'German' },
   { code: 'it', name: 'Italian' },
   { code: 'pt', name: 'Portuguese' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)' },
   { code: 'ru', name: 'Russian' },
   { code: 'ja', name: 'Japanese' },
   { code: 'ko', name: 'Korean' },
-  { code: 'zh', name: 'Chinese' }
+  { code: 'zh', name: 'Chinese (Simplified)' },
+  { code: 'zh-TW', name: 'Chinese (Traditional)' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'bn', name: 'Bengali' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'th', name: 'Thai' },
+  { code: 'id', name: 'Indonesian' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'da', name: 'Danish' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'el', name: 'Greek' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'ro', name: 'Romanian' },
+  { code: 'hu', name: 'Hungarian' },
+  { code: 'he', name: 'Hebrew' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'fa', name: 'Persian' },
+  { code: 'ur', name: 'Urdu' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'mr', name: 'Marathi' },
+  { code: 'gu', name: 'Gujarati' },
+  { code: 'kn', name: 'Kannada' },
+  { code: 'ml', name: 'Malayalam' },
+  { code: 'sw', name: 'Swahili' },
+  { code: 'fil', name: 'Filipino' },
+  { code: 'ms', name: 'Malay' },
+  { code: 'ca', name: 'Catalan' },
+  { code: 'sk', name: 'Slovak' },
+  { code: 'bg', name: 'Bulgarian' },
+  { code: 'hr', name: 'Croatian' },
+  { code: 'sr', name: 'Serbian' },
+  { code: 'lt', name: 'Lithuanian' },
+  { code: 'lv', name: 'Latvian' },
+  { code: 'et', name: 'Estonian' },
+  { code: 'sl', name: 'Slovenian' },
+  { code: 'af', name: 'Afrikaans' }
 ]
 
-function DemoPage() {
+function DemoPage({ onBackToHome }) {
   const [inputText, setInputText] = useState('')
   const [sourceLang, setSourceLang] = useState('en')
   const [targetLang, setTargetLang] = useState('es')
   const [translations, setTranslations] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
-  const { connect, disconnect, sendMessage, connectionState, addMessageHandler } = useWebSocket('ws://localhost:3001')
+  // Dynamically determine WebSocket URL based on frontend URL
+  const getWebSocketUrl = () => {
+    const hostname = window.location.hostname;
+    console.log('[DemoPage] Detected hostname:', hostname);
+    
+    // Validate IP address format
+    const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    
+    if (hostname !== 'localhost' && !ipv4Pattern.test(hostname)) {
+      console.error('[DemoPage] Invalid hostname format, using localhost');
+      return 'ws://localhost:3001/translate';
+    }
+    
+    return `ws://${hostname}:3001/translate`;
+  };
+
+  // Get the WebSocket URL - ensure it has /translate path
+  const websocketUrl = import.meta.env.VITE_WS_URL || getWebSocketUrl();
+  // Force /translate path if not present
+  const finalWebSocketUrl = websocketUrl.endsWith('/translate') ? websocketUrl : websocketUrl + '/translate';
+  console.log('[DemoPage] Final WebSocket URL being used:', finalWebSocketUrl);
+
+  const { connect, disconnect, sendMessage, connectionState, addMessageHandler } = useWebSocket(finalWebSocketUrl)
 
   React.useEffect(() => {
     connect()
@@ -89,9 +154,22 @@ function DemoPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Text Translation Demo</h2>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <Header />
+      <div className="container mx-auto px-4 py-8">
+        {onBackToHome && (
+          <button
+            onClick={onBackToHome}
+            className="mb-4 px-4 py-2 text-gray-600 hover:text-gray-800 flex items-center gap-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Home</span>
+          </button>
+        )}
+        
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Text Translation Demo</h2>
         
         {/* Language Selection */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -196,6 +274,8 @@ function DemoPage() {
               ))}
             </div>
           )}
+        </div>
+          </div>
         </div>
       </div>
     </div>

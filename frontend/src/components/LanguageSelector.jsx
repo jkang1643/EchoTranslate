@@ -25,4 +25,4 @@ function LanguageSelector({ label, languages, selectedLanguage, onLanguageChange
   )
 }
 
-export default LanguageSelector
+export { LanguageSelector }
