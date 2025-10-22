@@ -48,6 +48,8 @@ Frontend (React) ←→ WebSocket ←→ Node.js Backend ←→ Gemini Realtime 
    ```
 
 3. **Set up environment variables**
+   
+   **Backend environment:**
    ```bash
    cp env.example .env
    ```
@@ -56,6 +58,13 @@ Frontend (React) ←→ WebSocket ←→ Node.js Backend ←→ Gemini Realtime 
    ```
    GEMINI_API_KEY=your_gemini_api_key_here
    PORT=3001
+   ```
+   
+   **Frontend environment:**
+   Create a `.env.local` file in the `frontend/` folder:
+   ```bash
+   # frontend/.env.local
+   VITE_WS_URL=ws://localhost:3001
    ```
 
 4. **Get a Gemini API key**
