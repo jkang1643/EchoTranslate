@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Real-Time Translation App Startup Script
+# EchoTranslate Startup Script
 
-echo "🚀 Starting Real-Time Translation App..."
+echo "🚀 Starting EchoTranslate..."
 
 # Check if .env file exists
 if [ ! -f .env ]; then

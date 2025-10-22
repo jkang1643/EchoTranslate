@@ -1,7 +1,7 @@
 {
-  "name": "realtime-translation-backend",
+  "name": "echotranslate-backend",
   "version": "1.0.0",
-  "description": "Backend for real-time translation app",
+  "description": "EchoTranslate Backend - Real-time translation server",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
-  "author": "Real-Time Translation App",
+  "author": "EchoTranslate",
   "license": "UNLICENSED",
   "private": true
 }

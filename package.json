@@ -1,7 +1,7 @@
 {
-  "name": "realtime-translation-app",
+  "name": "echotranslate",
   "version": "1.0.0",
-  "description": "Real-time translation app using Gemini Realtime API",
+  "description": "EchoTranslate - Real-time speech translation powered by Gemini AI",
   "main": "backend/server.js",
   "scripts": {
     "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
@@ -14,8 +14,8 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
-  "keywords": ["translation", "gemini", "realtime", "speech", "ai"],
-  "author": "Real-Time Translation App",
+  "keywords": ["translation", "gemini", "realtime", "speech", "ai", "echotranslate"],
+  "author": "EchoTranslate",
   "license": "UNLICENSED",
   "private": true
 }

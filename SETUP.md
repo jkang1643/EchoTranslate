@@ -82,7 +82,7 @@ npm run dev
 ## 📁 File Structure (Should Look Like This)
 
 ```
-realtimetranslationapp/
+echotranslate/
 ├── .env                 ← YOU NEED THIS FILE (with your API key)
 ├── env.example          ← Template (don't edit this)
 ├── backend/

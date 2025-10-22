@@ -1,5 +1,5 @@
 @echo off
-echo 🚀 Starting Real-Time Translation App...
+echo 🚀 Starting EchoTranslate...
 
 REM Check if .env file exists
 if not exist .env (

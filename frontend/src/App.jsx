@@ -1,6 +1,6 @@
 /**
- * Real-Time Translation App - Frontend Application
- * Copyright (c) 2025 Real-Time Translation App. All Rights Reserved.
+ * EchoTranslate - Frontend Application
+ * Copyright (c) 2025 EchoTranslate. All Rights Reserved.
  * 
  * PROPRIETARY AND CONFIDENTIAL
  */

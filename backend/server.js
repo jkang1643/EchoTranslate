@@ -1,6 +1,6 @@
 /**
- * Real-Time Translation App - Backend Server
- * Copyright (c) 2025 Real-Time Translation App. All Rights Reserved.
+ * EchoTranslate - Backend Server
+ * Copyright (c) 2025 EchoTranslate. All Rights Reserved.
  * 
  * PROPRIETARY AND CONFIDENTIAL
  * 
