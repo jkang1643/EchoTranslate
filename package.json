@@ -15,6 +15,7 @@
     "concurrently": "^8.2.2"
   },
   "keywords": ["translation", "gemini", "realtime", "speech", "ai"],
-  "author": "",
-  "license": "MIT"
+  "author": "Real-Time Translation App",
+  "license": "UNLICENSED",
+  "private": true
 }

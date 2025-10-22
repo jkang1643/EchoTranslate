@@ -18,5 +18,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
-  }
+  },
+  "author": "Real-Time Translation App",
+  "license": "UNLICENSED",
+  "private": true
 }

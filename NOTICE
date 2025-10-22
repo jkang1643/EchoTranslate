@@ -1,0 +1,89 @@
+PROPRIETARY SOFTWARE NOTICE
+============================
+
+Real-Time Translation App
+Copyright (c) 2025 Real-Time Translation App. All Rights Reserved.
+
+This software and all associated materials are proprietary and confidential.
+
+INTELLECTUAL PROPERTY PROTECTION
+---------------------------------
+
+This software is protected by:
+1. Copyright law
+2. Trade secret law
+3. Confidentiality obligations
+4. Contractual restrictions
+
+PROTECTED ASSETS
+----------------
+
+The following aspects of this software are proprietary and confidential:
+
+1. **Source Code**: All source code, scripts, and configuration files
+2. **Architecture**: The real-time streaming translation architecture
+3. **Algorithms**: Translation processing and audio streaming algorithms
+4. **API Integration**: Methods for integrating with AI services
+5. **User Interface**: Design, layout, and user experience elements
+6. **Documentation**: All technical and user documentation
+7. **Business Methods**: Translation service delivery methods
+8. **Trade Secrets**: Any non-public technical or business information
+
+RESTRICTIONS
+------------
+
+Without explicit written permission from the copyright holder, you may NOT:
+
+- Use this software for any purpose
+- Copy or reproduce any portion of this software
+- Modify, adapt, or create derivative works
+- Distribute, sell, lease, or sublicense this software
+- Reverse engineer, decompile, or disassemble this software
+- Remove or alter any copyright notices or proprietary markings
+- Disclose any confidential information to third parties
+- Use this software for commercial purposes
+
+PERMITTED ACTIVITIES
+--------------------
+
+Authorized parties may:
+- View the source code for evaluation purposes only
+- Such viewing grants NO rights to use, copy, modify, or distribute
+
+CONFIDENTIALITY
+---------------
+
+This software contains trade secrets and confidential information. 
+All persons with access must:
+- Maintain strict confidentiality
+- Not disclose any information to third parties
+- Use the software only as expressly authorized
+
+ENFORCEMENT
+-----------
+
+Violations of these terms may result in:
+- Immediate termination of access rights
+- Civil litigation for damages
+- Criminal prosecution where applicable
+- Injunctive relief to prevent further violations
+
+CONTACT
+-------
+
+For licensing inquiries, permissions, or other questions:
+Contact the copyright holder through official channels.
+
+THIRD-PARTY NOTICES
+-------------------
+
+This software uses various open-source libraries and dependencies.
+The use of those third-party components is governed by their respective
+licenses and does NOT extend any rights to this proprietary software.
+
+See package.json files for a list of dependencies and their licenses.
+
+---
+
+Last Updated: January 2025
+

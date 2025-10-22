@@ -1,3 +1,16 @@
+/**
+ * Real-Time Translation App - Backend Server
+ * Copyright (c) 2025 Real-Time Translation App. All Rights Reserved.
+ * 
+ * PROPRIETARY AND CONFIDENTIAL
+ * 
+ * This software contains proprietary and confidential information.
+ * Unauthorized copying, modification, distribution, or use of this
+ * software is strictly prohibited.
+ * 
+ * See LICENSE file for complete terms and conditions.
+ */
+
 import express from "express";
 import WebSocket, { WebSocketServer } from "ws";
 import fetch from "node-fetch";

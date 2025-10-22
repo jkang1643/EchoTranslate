@@ -1,3 +1,10 @@
+/**
+ * Real-Time Translation App - Frontend Application
+ * Copyright (c) 2025 Real-Time Translation App. All Rights Reserved.
+ * 
+ * PROPRIETARY AND CONFIDENTIAL
+ */
+
 import React, { useState, useEffect } from 'react'
 import TranslationInterface from './components/TranslationInterface'
 import DemoPage from './components/DemoPage'

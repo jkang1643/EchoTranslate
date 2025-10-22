@@ -106,9 +106,11 @@ npm start
 ## 🔧 Configuration
 
 ### Language Support
-The app supports 10+ languages:
-- English, Spanish, French, German, Italian
-- Portuguese, Russian, Japanese, Korean, Chinese
+The app supports 53+ languages including:
+- **European**: English, Spanish, French, German, Italian, Portuguese, Russian, Polish, Dutch, Turkish, Greek, Romanian, Hungarian, Czech, Slovak, Bulgarian, Croatian, Serbian, Ukrainian, and more
+- **Asian**: Chinese (Simplified & Traditional), Japanese, Korean, Hindi, Bengali, Tamil, Telugu, Thai, Vietnamese, Indonesian, Filipino, Malay, and more
+- **Middle Eastern**: Arabic, Persian, Hebrew, Urdu
+- **Other**: Swahili, Afrikaans, Catalan, and more
 
 ### Audio Settings
 - **Sample Rate**: 16kHz (optimized for speech)
@@ -298,25 +300,25 @@ EXPOSE 3001
 CMD ["npm", "start"]
 ```
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
 ## 📄 License
 
-MIT License - see LICENSE file for details
+**PROPRIETARY - All Rights Reserved**
+
+This software is proprietary and confidential. Unauthorized copying, modification, distribution, or use of this software, via any medium, is strictly prohibited without explicit written permission from the copyright holder.
+
+See the LICENSE file for complete terms and conditions.
 
 ## 🆘 Support
 
-For issues and questions:
+For authorized users:
 1. Check the troubleshooting section
 2. Review browser console for errors
 3. Verify API key and permissions
-4. Create an issue on GitHub
+4. Contact support through official channels
+
+## ⚖️ Legal Notice
+
+This software and all associated intellectual property, including but not limited to the real-time translation system, streaming architecture, and AI integration methods, are protected by copyright law and trade secret law. Any unauthorized use, disclosure, or distribution may result in legal action.
 
 ## 🔮 Future Enhancements
 
