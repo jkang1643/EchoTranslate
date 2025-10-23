@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react'
 export function useAudioCapture() {
   const [isRecording, setIsRecording] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [availableDevices, setAvailableDevices] = useState([])
   
   const mediaRecorderRef = useRef(null)
   const audioContextRef = useRef(null)
@@ -98,6 +99,15 @@ export function useAudioCapture() {
       console.log(`[⚙️  Worker] Drained ${drainedChunks} chunks from queue → batch size: ${currentBatchRef.current.length} samples`)
     }
     
+    // Queue pressure detection: Force flush if queue is getting too full
+    if (audioQueueRef.current.length >= config.maxQueueSize * 0.7) {
+      console.warn(`[⚠️  Worker] Queue high (${audioQueueRef.current.length}/${config.maxQueueSize}) - forcing flush`)
+      if (currentBatchRef.current.length > 0) {
+        flushBatch(onAudioChunk, 'queue_pressure', true)
+        return // Exit early after forced flush
+      }
+    }
+    
     // Check if we should flush the current batch
     const batchDuration = (currentBatchRef.current.length / config.sampleRate) * 1000
     const timeSinceBatchStart = now - batchStartTimeRef.current
@@ -105,13 +115,18 @@ export function useAudioCapture() {
     
     let flushReason = null
     
-    // Flush conditions:
-    if (batchDuration >= (config.maxSegmentMs * 0.75) && timeSinceBatchStart >= config.maxSegmentMs) {
-      flushReason = `max_duration_${(config.maxSegmentMs / 1000).toFixed(1)}s`
-    } else if (timeSinceLastSpeech > config.silenceTimeoutMs && batchDuration >= config.minSegmentMs) {
-      flushReason = `silence_${(config.silenceTimeoutMs / 1000).toFixed(1)}s`
-    } else if (batchDuration >= (config.maxSegmentMs * 1.2)) {
+    // ACTIVE ROLLING FLUSH: Time-based, not duration-based
+    // PRIMARY: Rolling flush at fixed interval (regardless of content)
+    if (timeSinceBatchStart >= config.maxSegmentMs) {
+      flushReason = `rolling_flush_${(config.maxSegmentMs / 1000).toFixed(1)}s`
+    }
+    // SAFETY: Overflow protection (should rarely trigger with rolling flush)
+    else if (batchDuration >= (config.maxSegmentMs * 1.5)) {
       flushReason = 'overflow_protection'
+    }
+    // OPTIONAL: Early flush on silence (for natural pauses)
+    else if (timeSinceLastSpeech > config.silenceTimeoutMs && batchDuration >= config.minSegmentMs) {
+      flushReason = `silence_${(config.silenceTimeoutMs / 1000).toFixed(1)}s`
     }
     
     if (flushReason) {
@@ -123,7 +138,7 @@ export function useAudioCapture() {
   // BATCH FLUSHER: Fire-and-forget async send
   // Allows overlapping sends - never blocks capture or worker
   // ====================================================================
-  const flushBatch = (onAudioChunk, reason) => {
+  const flushBatch = (onAudioChunk, reason, force = false) => {
     const config = configRef.current
     
     if (currentBatchRef.current.length === 0) {
@@ -132,8 +147,8 @@ export function useAudioCapture() {
     
     const batchDuration = (currentBatchRef.current.length / config.sampleRate) * 1000
     
-    // Don't send if too short (unless it's a stop signal)
-    if (batchDuration < config.minSegmentMs && reason !== 'stop') {
+    // Don't send if too short (unless it's a stop signal or forced)
+    if (!force && batchDuration < config.minSegmentMs && reason !== 'stop') {
       console.log(`[⏭️  Worker] Skip: ${batchDuration.toFixed(0)}ms too short (min: ${config.minSegmentMs}ms)`)
       return
     }
@@ -146,11 +161,13 @@ export function useAudioCapture() {
     console.log(`[🚀 Flush #${sendId}] START: ${batchDuration.toFixed(0)}ms, reason: "${reason}", queue: ${queueSizeAtFlush} chunks, active sends: ${activeSendsRef.current}`)
     
     // Calculate overlap and prepare next batch immediately
+    // CRITICAL: Overlap ensures continuity between segments for rolling flush
     const overlapSamples = Math.floor((config.sampleRate * config.overlapMs) / 1000)
     const overlapData = Array.from(batchSnapshot.slice(-Math.min(overlapSamples, batchSnapshot.length)))
     
     // Reset batch with overlap BEFORE async processing
     currentBatchRef.current = overlapData
+    // CRITICAL: Reset timer immediately for accurate rolling flush intervals
     batchStartTimeRef.current = performance.now()
     
     // Fire-and-forget async send (allows overlapping)
@@ -193,7 +210,30 @@ export function useAudioCapture() {
     }, 0)
   }
 
-  const startRecording = useCallback(async (onAudioChunk, streaming = false, customConfig = null) => {
+  // Get available audio input devices
+  const getAudioDevices = useCallback(async () => {
+    try {
+      // Request permission first to enumerate devices with labels
+      await navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => stream.getTracks().forEach(track => track.stop()))
+      
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioInputs = devices.filter(device => device.kind === 'audioinput')
+      
+      console.log('[AudioCapture] Available audio input devices:', audioInputs.length)
+      audioInputs.forEach((device, i) => {
+        console.log(`  ${i + 1}. ${device.label || `Device ${i + 1}`} (${device.deviceId})`)
+      })
+      
+      setAvailableDevices(audioInputs)
+      return audioInputs
+    } catch (error) {
+      console.error('[AudioCapture] Failed to enumerate devices:', error)
+      return []
+    }
+  }, [])
+
+  const startRecording = useCallback(async (onAudioChunk, streaming = false, customConfig = null, inputMode = 'microphone', deviceId = null) => {
     try {
       // Update configuration if provided
       if (customConfig) {
@@ -202,15 +242,89 @@ export function useAudioCapture() {
       
       const config = configRef.current
       
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
+      let stream = null
+      
+      if (inputMode === 'system') {
+        // System Audio Mode: Use getDisplayMedia with audio
+        console.log('[AudioCapture] Requesting system audio via screen capture...')
+        
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({ 
+            video: true, // Required by some browsers
+            audio: {
+              echoCancellation: false, // Don't cancel for system audio
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          })
+          
+          // Check if we actually got audio tracks
+          const audioTracks = stream.getAudioTracks()
+          const videoTracks = stream.getVideoTracks()
+          
+          console.log('[AudioCapture] Tracks captured:', {
+            audio: audioTracks.length,
+            video: videoTracks.length
+          })
+          
+          if (audioTracks.length === 0) {
+            // Stop video tracks if we got them
+            videoTracks.forEach(track => track.stop())
+            throw new Error('No audio track captured. Make sure to select "Share tab audio" or "Share system audio" in the permission dialog, or choose a tab/window that is playing audio.')
+          }
+          
+          // Log audio track settings
+          audioTracks.forEach((track, i) => {
+            const settings = track.getSettings()
+            console.log(`[AudioCapture] Audio track ${i}:`, settings)
+          })
+          
+          // Stop video track immediately if present - we only want audio
+          videoTracks.forEach(track => {
+            console.log('[AudioCapture] Stopping video track (only need audio)')
+            track.stop()
+          })
+          
+          console.log('[AudioCapture] ✅ System audio capture started successfully!')
+        } catch (err) {
+          if (err.name === 'NotAllowedError') {
+            throw new Error('Screen sharing permission denied. Please allow screen sharing and make sure to check "Share tab audio" or "Share system audio" in the dialog.')
+          } else if (err.name === 'NotSupportedError') {
+            throw new Error('System audio capture is not supported in this browser. Try using Chrome, Edge, or Firefox on desktop.')
+          }
+          throw err
+        }
+      } else {
+        // Microphone Mode: Use getUserMedia
+        const audioConstraints = {
           sampleRate: config.sampleRate,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
-        } 
-      })
+        }
+        
+        // If specific device requested, use it
+        if (deviceId) {
+          audioConstraints.deviceId = { exact: deviceId }
+          console.log('[AudioCapture] Requesting specific device:', deviceId)
+        } else {
+          console.log('[AudioCapture] Requesting default microphone...')
+        }
+        
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: audioConstraints
+        })
+        
+        // Log which device was actually used
+        const tracks = stream.getAudioTracks()
+        if (tracks.length > 0) {
+          const settings = tracks[0].getSettings()
+          console.log('[AudioCapture] ✅ Microphone access granted:', settings.label || 'Unknown device')
+          console.log('[AudioCapture] Device settings:', settings)
+        }
+      }
+      
       streamRef.current = stream
 
       // Set up audio context for PCM capture and level monitoring
@@ -277,8 +391,10 @@ export function useAudioCapture() {
           const rms = calculateRMS(pcmData)
           
           // Adaptive threshold using exponential moving average
-          averageEnergyRef.current = 0.95 * averageEnergyRef.current + 0.05 * rms
-          const threshold = Math.max(config.silenceThreshold, averageEnergyRef.current * 1.5)
+          // Use slower adaptation (0.98 vs 0.95) for more stable threshold during continuous speech
+          averageEnergyRef.current = 0.98 * averageEnergyRef.current + 0.02 * rms
+          // Use lower multiplier (1.2 vs 1.5) to avoid false silence detection during speech
+          const threshold = Math.max(config.silenceThreshold, averageEnergyRef.current * 1.2)
           
           // Update last speech time if energy exceeds threshold
           if (rms > threshold) {
@@ -431,6 +547,8 @@ export function useAudioCapture() {
     isRecording,
     audioLevel,
     updateConfig,
-    getConfig
+    getConfig,
+    getAudioDevices,
+    availableDevices
   }
 }

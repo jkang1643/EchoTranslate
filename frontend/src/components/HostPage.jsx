@@ -9,6 +9,7 @@ import { Header } from './Header';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LanguageSelector } from './LanguageSelector';
 import AudioDebugSettings from './AudioDebugSettings';
+import { getAvailableAudioInputModes, getRecommendedAudioMode, getDeviceType } from '../utils/deviceDetection';
 
 // Dynamically determine backend URL based on frontend URL
 // If accessing via network IP, use the same IP for backend
@@ -137,9 +138,16 @@ export function HostPage({ onBackToHome }) {
   };
   
   const [audioSettings, setAudioSettings] = useState(getInitialAudioSettings());
+  
+  // Audio input mode (microphone or system audio)
+  const [audioInputMode, setAudioInputMode] = useState(getRecommendedAudioMode());
+  const [availableAudioModes] = useState(getAvailableAudioInputModes());
+  const [deviceType] = useState(getDeviceType());
+  const [activeInputSource, setActiveInputSource] = useState(null);
 
   const wsRef = useRef(null);
-  const { startRecording, stopRecording, isRecording, audioLevel, updateConfig } = useAudioCapture();
+  const { startRecording, stopRecording, isRecording, audioLevel, updateConfig, getAudioDevices, availableDevices } = useAudioCapture();
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   
   // Save audio settings to localStorage whenever they change
   useEffect(() => {
@@ -153,6 +161,10 @@ export function HostPage({ onBackToHome }) {
   // Create session on mount
   useEffect(() => {
     createSession();
+    
+    // Load available audio devices
+    getAudioDevices();
+    
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -278,13 +290,22 @@ export function HostPage({ onBackToHome }) {
             metadata: metadata || {}
           }));
         }
-      }, true, audioSettings); // streaming mode with custom audio settings
+      }, true, audioSettings, audioInputMode, selectedDeviceId); // streaming mode with custom audio settings, input mode, and device ID
       
       setIsStreaming(true);
+      
+      // Set active source label
+      if (audioInputMode === 'system') {
+        setActiveInputSource('🔊 System Audio');
+      } else {
+        const device = availableDevices.find(d => d.deviceId === selectedDeviceId);
+        setActiveInputSource(device ? `🎤 ${device.label}` : '🎤 Microphone');
+      }
+      
       setError('');
     } catch (err) {
       console.error('Failed to start recording:', err);
-      setError('Failed to access microphone. Please check permissions.');
+      setError(`Failed to start ${audioInputMode === 'system' ? 'system audio' : 'microphone'} capture: ${err.message}`);
     }
   };
   
@@ -317,6 +338,7 @@ export function HostPage({ onBackToHome }) {
     }
     
     setIsStreaming(false);
+    setActiveInputSource(null);
   };
 
   const handleSourceLangChange = (lang) => {
@@ -410,6 +432,92 @@ export function HostPage({ onBackToHome }) {
             {showAdvancedSettings && (
               <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                 <div className="space-y-4">
+                  {/* Audio Input Mode Selection */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-2">
+                      Audio Input Source
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableAudioModes.map((mode) => (
+                        <button
+                          key={mode.value}
+                          onClick={() => setAudioInputMode(mode.value)}
+                          disabled={isStreaming}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-all ${
+                            audioInputMode === mode.value
+                              ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                              : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                          } ${isStreaming ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          <span className="text-lg">{mode.icon}</span>
+                          <span className="font-medium">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+                
+                {/* Microphone Device Selector */}
+                {audioInputMode === 'microphone' && availableDevices.length > 0 && (
+                  <div className="mt-3">
+                    <label className="text-xs font-medium text-gray-600 block mb-1">
+                      Select Microphone Device:
+                    </label>
+                    <select
+                      value={selectedDeviceId || ''}
+                      onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+                      disabled={isStreaming}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Default Microphone</option>
+                      {availableDevices.map((device) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `Microphone ${device.deviceId.slice(0, 8)}...`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 Choose your built-in mic, USB mic, audio interface, or any connected audio input device
+                    </p>
+                  </div>
+                )}
+                
+                <div className="text-xs text-gray-600 mt-2 space-y-2">
+                      {deviceType === 'mobile' || deviceType === 'tablet' ? (
+                        <p>
+                          📱 <strong>{deviceType === 'mobile' ? 'Mobile' : 'Tablet'} device detected:</strong> Only microphone input is available.
+                          {deviceType === 'tablet' && ' System audio requires a desktop browser.'}
+                        </p>
+                      ) : (
+                        <>
+                          <p>
+                            💻 <strong>Desktop detected:</strong> Choose between microphone or system audio (captures what's playing on your computer).
+                          </p>
+                          {audioInputMode === 'system' && (
+                            <div className="bg-blue-50 border border-blue-200 rounded p-2 mt-2">
+                              <p className="font-semibold text-blue-900 mb-1">🔊 System Audio Setup (READ CAREFULLY!):</p>
+                              <ol className="list-decimal list-inside space-y-1 text-blue-800">
+                                <li><strong>Open YouTube/Spotify/etc in a NEW TAB</strong> (not this app!) and start playing audio</li>
+                                <li>Come back to this tab and click "Start Broadcasting" - browser dialog will appear</li>
+                                <li><strong>CRITICAL:</strong> Click the <strong>"Chrome Tab"</strong> or <strong>"Tab"</strong> option at the top (NOT "Window" or "Entire Screen")</li>
+                                <li><strong>Select the OTHER tab</strong> that's playing audio (YouTube, Spotify, etc.) - <strong>NOT the localhost tab!</strong></li>
+                                <li><strong>Check the "Share tab audio"</strong> checkbox at the bottom before clicking Share</li>
+                                <li>Click "Share" - you should see the audio level meter moving with the audio from that other tab</li>
+                              </ol>
+                              <div className="mt-2 space-y-1">
+                                <p className="text-red-600 font-semibold">⚠️ "Window" and "Screen" options do NOT capture audio - only "Tab" works!</p>
+                                <p className="text-purple-600 font-semibold">💡 You're capturing audio FROM another tab TO translate it here!</p>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {isStreaming && (
+                        <p className="text-amber-600 font-medium">
+                          ⚠️ Stop broadcasting to change audio input source
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  
                   {/* Max Stream Duration Slider */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -483,13 +591,25 @@ export function HostPage({ onBackToHome }) {
           {/* Audio Level Indicator */}
           {isStreaming && (
             <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-2">Audio Level:</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-gray-600">Audio Level:</p>
+                {activeInputSource && (
+                  <span className="text-xs font-medium text-gray-700 bg-gray-100 px-2 py-1 rounded">
+                    {activeInputSource}
+                  </span>
+                )}
+              </div>
               <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
                 <div
                   className="bg-green-500 h-full transition-all duration-100"
                   style={{ width: `${audioLevel * 100}%` }}
                 />
               </div>
+              {audioLevel === 0 && (
+                <p className="text-xs text-red-600 font-semibold mt-2">
+                  ⚠️ No audio detected! If using System Audio, make sure you selected a TAB (not window) and checked "Share tab audio"
+                </p>
+              )}
             </div>
           )}
 

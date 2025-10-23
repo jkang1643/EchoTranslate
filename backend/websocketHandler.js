@@ -426,32 +426,30 @@ export async function handleHostConnection(clientWs, sessionId) {
           if (geminiWs && geminiWs.readyState === WebSocket.OPEN && setupComplete) {
             totalAudioChunksReceived++;
             
-            // Log segment metadata if provided
+            // Extract metadata for segment analysis
+            let segmentReason = 'unknown';
+            let segmentDuration = 0;
             if (message.metadata) {
               const { duration, reason, overlapMs, sendId, queueSize } = message.metadata;
+              segmentReason = reason || 'unknown';
+              segmentDuration = duration || 0;
               console.log(`[Host] 📥 Audio chunk #${totalAudioChunksReceived} (send #${sendId || '?'}): ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms, queue: ${queueSize || '?'}`);
             }
             
+            // Determine segment type
+            const isRollingFlush = segmentReason.startsWith('rolling_flush');
+            const isQueuePressure = segmentReason === 'queue_pressure';
+            const isSilence = segmentReason.startsWith('silence');
+            
+            // Start or continue audio stream
             if (!isStreamingAudio) {
-              console.log('[Host] 🎤 Starting NEW audio stream');
+              console.log('[Host] 🎤 Starting continuous audio stream');
               isStreamingAudio = true;
               streamStartTime = Date.now();
               firstAudioSentTime = Date.now();
-              
-              // Get max stream duration from session settings
-              const userMaxDuration = sessionStore.getMaxStreamDuration(sessionId) || 3000;
-              
-              // Apply pre-emptive stop: reduce by 500ms for buffer
-              const actualMaxDuration = userMaxDuration - EARLY_STOP_BUFFER;
-              console.log(`[Host] ⏱️  Max stream duration: ${userMaxDuration}ms (using ${actualMaxDuration}ms with ${EARLY_STOP_BUFFER}ms buffer)`);
-              
-              // Set hard timeout for max stream duration
-              maxStreamTimer = setTimeout(() => {
-                console.log('[Host] ⏰ Max stream duration reached, forcing cutoff');
-                triggerGracefulAudioEnd();
-              }, actualMaxDuration);
             }
             
+            // Send audio chunk to Gemini (always, regardless of segment type)
             const audioMessage = {
               realtimeInput: {
                 audio: {
@@ -471,12 +469,55 @@ export async function handleHostConnection(clientWs, sessionId) {
             
             lastAudioTime = Date.now();
             
-            // Reset idle timeout (this resets on each audio chunk)
-            if (audioEndTimer) clearTimeout(audioEndTimer);
-            audioEndTimer = setTimeout(() => {
-              console.log('[Host] 🔇 Silence detected, triggering audio end');
-              triggerGracefulAudioEnd();
-            }, AUDIO_END_TIMEOUT);
+            // CRITICAL STRATEGY: Keep stream OPEN during continuous speech
+            // Only complete turn on queue pressure, or after max duration with no new audio
+            if (isRollingFlush || isSilence) {
+              // Continue accumulating audio in the same stream
+              console.log('[Host] 🔄 Accumulating audio - stream remains open');
+              
+              // Set reasonable max duration (8s) - prevents Gemini overload
+              // Timer does NOT reset with each chunk - it's absolute from stream start
+              const streamDuration = Date.now() - streamStartTime;
+              if (!maxStreamTimer && streamDuration < 8000) {
+                // Set timer for remaining time until 8s total
+                const remainingTime = 8000 - streamDuration;
+                maxStreamTimer = setTimeout(() => {
+                  console.log('[Host] ⏰ Max accumulation (8s) - completing turn to prevent Gemini overload');
+                  sendAudioStreamEnd();
+                }, remainingTime);
+              }
+              
+              // ALSO complete turn based on actual idle (no new audio)
+              // For silence segments: wait to confirm pause (3s)
+              // For rolling flush: check for idle (2.5s)
+              // Longer timeouts prevent breaking during natural test pauses
+              const idleTimeout = isSilence ? 3000 : 2500;
+              if (audioEndTimer) clearTimeout(audioEndTimer);
+              audioEndTimer = setTimeout(() => {
+                console.log(`[Host] 🔇 No audio for ${idleTimeout}ms - completing turn`);
+                sendAudioStreamEnd();
+              }, idleTimeout);
+              
+            } else if (isQueuePressure) {
+              console.log('[Host] ⚠️  Queue pressure - forcing immediate completion');
+              sendAudioStreamEnd();
+              
+              if (audioEndTimer) {
+                clearTimeout(audioEndTimer);
+                audioEndTimer = null;
+              }
+              if (maxStreamTimer) {
+                clearTimeout(maxStreamTimer);
+                maxStreamTimer = null;
+              }
+            } else {
+              // Unknown segment type - use conservative timeout
+              if (audioEndTimer) clearTimeout(audioEndTimer);
+              audioEndTimer = setTimeout(() => {
+                console.log('[Host] 🔇 Fallback timeout - completing turn');
+                sendAudioStreamEnd();
+              }, AUDIO_END_TIMEOUT);
+            }
           } else if (!setupComplete && messageQueue.length < 10) {
             console.log(`[Host] 📋 Queuing audio (setup not complete), queue size: ${messageQueue.length + 1}`);
             messageQueue.push({ type: 'audio', message });

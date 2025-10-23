@@ -7,6 +7,7 @@ import { Header } from './Header'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAudioCapture } from '../hooks/useAudioCapture'
 import AudioDebugSettings from './AudioDebugSettings'
+import { getAvailableAudioInputModes, getRecommendedAudioMode, getDeviceType } from '../utils/deviceDetection'
 
 const LANGUAGES = [
   { code: 'en', name: 'English' },
@@ -98,6 +99,12 @@ function TranslationInterface({ onBackToHome }) {
   };
   
   const [audioSettings, setAudioSettings] = useState(getInitialAudioSettings())
+  
+  // Audio input mode (microphone or system audio)
+  const [audioInputMode, setAudioInputMode] = useState(getRecommendedAudioMode())
+  const [availableAudioModes] = useState(getAvailableAudioInputModes())
+  const [deviceType] = useState(getDeviceType())
+  const [activeInputSource, setActiveInputSource] = useState(null)
 
   // Dynamically determine WebSocket URL based on frontend URL
   const getWebSocketUrl = () => {
@@ -137,8 +144,12 @@ function TranslationInterface({ onBackToHome }) {
     stopRecording,
     isRecording,
     audioLevel,
-    updateConfig
+    updateConfig,
+    getAudioDevices,
+    availableDevices
   } = useAudioCapture()
+  
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   
   // Save audio settings to localStorage whenever they change
   useEffect(() => {
@@ -154,6 +165,9 @@ function TranslationInterface({ onBackToHome }) {
     
     // Add message handler
     const removeHandler = addMessageHandler(handleWebSocketMessage)
+    
+    // Load available audio devices
+    getAudioDevices()
     
     return () => {
       removeHandler()
@@ -181,7 +195,7 @@ function TranslationInterface({ onBackToHome }) {
     if (!isConnected) return
     
     try {
-      // Enable streaming mode (second parameter = true, third parameter = custom audio settings)
+      // Enable streaming mode (second parameter = true, third parameter = custom audio settings, fourth = input mode)
       await startRecording((audioChunk, metadata) => {
         // Send audio chunk to backend in real-time with language information and metadata
         sendMessage({
@@ -193,10 +207,19 @@ function TranslationInterface({ onBackToHome }) {
           // Include segment metadata for intelligent backend handling
           metadata: metadata || {}
         })
-      }, true, audioSettings) // true = streaming mode, audioSettings = custom config
+      }, true, audioSettings, audioInputMode, selectedDeviceId) // true = streaming mode, audioSettings = custom config, audioInputMode = mic/system, deviceId
       setIsListening(true)
+      
+      // Set active source label
+      if (audioInputMode === 'system') {
+        setActiveInputSource('🔊 System Audio')
+      } else {
+        const device = availableDevices.find(d => d.deviceId === selectedDeviceId)
+        setActiveInputSource(device ? `🎤 ${device.label}` : '🎤 Microphone')
+      }
     } catch (error) {
       console.error('Failed to start recording:', error)
+      alert(`Failed to start ${audioInputMode === 'system' ? 'system audio' : 'microphone'} capture: ${error.message}`)
     }
   }
   
@@ -230,6 +253,7 @@ function TranslationInterface({ onBackToHome }) {
     })
     
     setIsListening(false)
+    setActiveInputSource(null)
   }
 
   const handleLanguageChange = (type, language) => {
@@ -346,6 +370,91 @@ function TranslationInterface({ onBackToHome }) {
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <h3 className="font-semibold text-gray-900 mb-3">Settings</h3>
             <div className="space-y-4">
+              {/* Audio Input Mode Selection */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-2">
+                  Audio Input Source
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {availableAudioModes.map((mode) => (
+                    <button
+                      key={mode.value}
+                      onClick={() => setAudioInputMode(mode.value)}
+                      disabled={isListening}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-all ${
+                        audioInputMode === mode.value
+                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      } ${isListening ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className="text-lg">{mode.icon}</span>
+                      <span className="font-medium">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+                
+                {/* Microphone Device Selector */}
+                {audioInputMode === 'microphone' && availableDevices.length > 0 && (
+                  <div className="mt-3">
+                    <label className="text-xs font-medium text-gray-600 block mb-1">
+                      Select Microphone Device:
+                    </label>
+                    <select
+                      value={selectedDeviceId || ''}
+                      onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+                      disabled={isListening}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Default Microphone</option>
+                      {availableDevices.map((device) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `Microphone ${device.deviceId.slice(0, 8)}...`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 Choose your built-in mic, USB mic, audio interface, or any connected audio input device
+                    </p>
+                  </div>
+                )}
+                <div className="text-xs text-gray-600 mt-2 space-y-2">
+                  {deviceType === 'mobile' || deviceType === 'tablet' ? (
+                    <p>
+                      📱 <strong>{deviceType === 'mobile' ? 'Mobile' : 'Tablet'} device detected:</strong> Only microphone input is available.
+                      {deviceType === 'tablet' && ' System audio requires a desktop browser.'}
+                    </p>
+                  ) : (
+                    <>
+                      <p>
+                        💻 <strong>Desktop detected:</strong> Choose between microphone or system audio (captures what's playing on your computer).
+                      </p>
+                      {audioInputMode === 'system' && (
+                        <div className="bg-blue-50 border border-blue-200 rounded p-2 mt-2">
+                          <p className="font-semibold text-blue-900 mb-1">🔊 System Audio Setup (READ CAREFULLY!):</p>
+                          <ol className="list-decimal list-inside space-y-1 text-blue-800">
+                            <li><strong>Open YouTube/Spotify/etc in a NEW TAB</strong> (not this app!) and start playing audio</li>
+                            <li>Come back to this tab and click "Start Listening" - browser dialog will appear</li>
+                            <li><strong>CRITICAL:</strong> Click the <strong>"Chrome Tab"</strong> or <strong>"Tab"</strong> option at the top (NOT "Window" or "Entire Screen")</li>
+                            <li><strong>Select the OTHER tab</strong> that's playing audio (YouTube, Spotify, etc.) - <strong>NOT the localhost tab!</strong></li>
+                            <li><strong>Check the "Share tab audio"</strong> checkbox at the bottom before clicking Share</li>
+                            <li>Click "Share" - you should see the audio level meter moving with the audio from that other tab</li>
+                          </ol>
+                          <div className="mt-2 space-y-1">
+                            <p className="text-red-600 font-semibold">⚠️ "Window" and "Screen" options do NOT capture audio - only "Tab" works!</p>
+                            <p className="text-purple-600 font-semibold">💡 You're capturing audio FROM another tab TO translate it here!</p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {isListening && (
+                    <p className="text-amber-600 font-medium">
+                      ⚠️ Stop listening to change audio input source
+                    </p>
+                  )}
+                </div>
+              </div>
+              
               <div className="flex items-center space-x-4">
                 <label className="flex items-center space-x-2">
                   <input
@@ -435,19 +544,30 @@ function TranslationInterface({ onBackToHome }) {
                   <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
                   <span>LIVE</span>
                 </div>
+                {activeInputSource && (
+                  <span className="text-sm font-medium text-gray-700 bg-gray-100 px-2 py-1 rounded">
+                    {activeInputSource}
+                  </span>
+                )}
                 <span className="text-sm text-gray-600">Streaming translation...</span>
-                {audioLevel > 0 && (
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-gray-500">Audio:</span>
                   <div className="flex space-x-1">
                     {[...Array(5)].map((_, i) => (
                       <div
                         key={i}
-                        className={`w-1 h-4 rounded transition-all ${
-                          i < (audioLevel * 5) ? 'bg-red-500' : 'bg-gray-300'
+                        className={`w-2 h-4 rounded transition-all ${
+                          i < (audioLevel * 5) ? 'bg-green-500' : 'bg-gray-300'
                         }`}
                       />
                     ))}
                   </div>
-                )}
+                  {audioLevel === 0 && (
+                    <span className="text-xs text-red-600 font-semibold ml-2">
+                      ⚠️ No audio detected!
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>

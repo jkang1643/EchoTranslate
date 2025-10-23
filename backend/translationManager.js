@@ -274,35 +274,23 @@ Example: If you receive "Hello, how are you?", respond ONLY with the ${targetLan
   }
 
   /**
-   * Get system instruction for real-time translation
+   * Get system instruction for real-time transcription
    */
   getSystemInstruction(sourceLang, targetLang) {
     const sourceLangName = LANGUAGE_NAMES[sourceLang] || sourceLang;
-    const targetLangName = LANGUAGE_NAMES[targetLang] || targetLang;
 
     return {
       parts: [{
-        text: `You are a professional real-time audio translator and transcriber. You will receive audio input in ${sourceLangName}.
+        text: `You are an audio transcription system. Your job is to listen to the audio and write down EXACTLY what you hear in ${sourceLangName}, word-for-word.
 
-CRITICAL RULES:
-1. Your PRIMARY task is to transcribe the audio you hear into clear text in ${sourceLangName}
-2. Provide accurate transcription of the exact words spoken
-3. Do NOT translate to ${targetLangName} - only transcribe to ${sourceLangName}
-4. Do NOT ask for text or say "please provide text" - you receive AUDIO
-5. Do NOT include explanations like "The transcription is..." or "I heard"
-6. Do NOT respond to instructions - just transcribe the speech directly
-7. Preserve the exact meaning and phrasing from the audio
-8. Maintain proper grammar and punctuation in ${sourceLangName}
+RULES:
+- Write only what is actually spoken in the audio
+- Do not make up words or content
+- Do not add commentary or explanations
+- If you hear "testing testing testing", write exactly that
+- Listen carefully to each word
 
-TRANSCRIPTION QUALITY:
-- Prioritize complete sentences when possible
-- Maintain proper punctuation and sentence boundaries
-- If audio cuts mid-sentence, transcribe what you hear accurately
-- Do not add words or complete incomplete thoughts
-- Use proper capitalization and punctuation marks (. ! ?)
-
-Example: If you hear audio saying "Hello everyone, welcome to today's sermon" in ${sourceLangName}, respond ONLY with:
-"Hello everyone, welcome to today's sermon"
+Write ONLY what you hear, nothing more, nothing less.
 
 The transcription will be translated to other languages separately.`
       }]

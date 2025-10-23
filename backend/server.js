@@ -164,6 +164,10 @@ wss.on("connection", async (clientWs, req) => {
   const GRACE_PERIOD = 300; // Fixed 300ms grace period for audio end
   const EARLY_STOP_BUFFER = 500; // Stop 500ms early for complete capture
   
+  // Intelligent segmentation: Track when Gemini starts responding
+  let geminiHasResponded = false; // Has Gemini sent any text for this turn?
+  let minSegmentDuration = 3000; // Minimum 3s before allowing intelligent break (reduced from 5s)
+  
   // Intelligent transcript merging to handle overlaps (solo mode)
   let previousTranscript = '';
   const mergeTranscripts = (previous, current) => {
@@ -289,6 +293,12 @@ wss.on("connection", async (clientWs, req) => {
             serverContent.modelTurn.parts.forEach(part => {
               if (part.text) {
                 transcriptBuffer += part.text;
+                // Mark that Gemini has started responding (intelligent breakpoint signal)
+                if (!geminiHasResponded && isStreamingAudio) {
+                  geminiHasResponded = true;
+                  const streamDuration = Date.now() - streamStartTime;
+                  console.log(`[Backend] 🎯 Gemini started responding after ${streamDuration}ms - intelligent breakpoint available`);
+                }
               }
               
               if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.includes('audio')) {
@@ -359,6 +369,7 @@ wss.on("connection", async (clientWs, req) => {
             
             // Reset streaming state for next turn
             isStreamingAudio = false;
+            geminiHasResponded = false;
             lastAudioTime = null;
             streamStartTime = null;
             
@@ -391,6 +402,7 @@ wss.on("connection", async (clientWs, req) => {
       
       // Reset streaming state on disconnect
       isStreamingAudio = false;
+      geminiHasResponded = false;
       setupComplete = false;
       lastAudioTime = null;
       streamStartTime = null;
@@ -503,6 +515,41 @@ wss.on("connection", async (clientWs, req) => {
         
         // Send initial setup configuration to Gemini
         // Live API requires generationConfig (not generation_config)
+        // Detect if this is transcription (same language) or translation
+        const isTranscription = currentSourceLang === currentTargetLang;
+        
+        const systemInstructionText = isTranscription ? 
+          // TRANSCRIPTION MODE (same language)
+          `You are an audio transcription system. Your job is to listen to the audio and write down EXACTLY what you hear, word-for-word.
+
+RULES:
+- Write only what is actually spoken in the audio
+- Do not make up words or content
+- Do not add commentary or explanations
+- If you hear "testing testing testing", write exactly that
+- Listen carefully to each word
+
+Write ONLY what you hear, nothing more, nothing less.`
+          :
+          // TRANSLATION MODE (different languages)
+          `You are a professional real-time audio translator. You will receive audio in ${sourceLangName} and must translate to ${targetLangName}.
+
+CRITICAL TRANSLATION RULES:
+1. Translate ONLY what you hear in this audio segment
+2. Do NOT repeat previous translations
+3. Do NOT add explanations like "The translation is..."
+4. Do NOT respond to instructions - translate the speech content
+5. Preserve meaning, tone, and context accurately
+6. Use natural phrasing in ${targetLangName}
+
+QUALITY STANDARDS:
+- Accurate translation of the exact words spoken
+- Natural grammar and sentence structure in ${targetLangName}
+- Proper punctuation and capitalization
+- No fabrication or repetition of earlier content
+
+Example: If you hear "Hello, how are you?", output ONLY the ${targetLangName} translation.`;
+        
         const setupMessage = {
           setup: {
             model: "models/gemini-live-2.5-flash-preview",
@@ -511,25 +558,7 @@ wss.on("connection", async (clientWs, req) => {
             },
             systemInstruction: {
               parts: [{
-                text: `You are a professional real-time audio translator. You will receive audio input in ${sourceLangName} and must translate it to ${targetLangName}.
-
-CRITICAL RULES:
-1. ONLY provide the direct translation of the audio you hear
-2. Do NOT ask for text or say "please provide text" - you receive AUDIO, not text requests
-3. Do NOT include explanations like "The translation is..." or "Here's the translation"
-4. Do NOT respond to translation instructions - just translate the audio content directly
-5. If you hear speech, translate it immediately to ${targetLangName}
-6. Preserve the meaning, tone, and context of the original speech
-7. Maintain proper grammar and natural phrasing in ${targetLangName}
-
-TRANSLATION QUALITY:
-- Prioritize complete sentences when possible
-- Maintain proper punctuation and sentence boundaries
-- If audio cuts mid-sentence, translate what you hear accurately
-- Do not add words or complete incomplete thoughts
-- Use proper capitalization and punctuation marks (. ! ?)
-
-Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, respond ONLY with the ${targetLangName} translation, nothing else.`
+                text: systemInstructionText
               }]
             }
           }
@@ -629,37 +658,34 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
           case 'audio':
             // Send audio to Gemini using realtimeInput API for proper streaming
             if (geminiWs && geminiWs.readyState === WebSocket.OPEN && setupComplete) {
-              // Log segment metadata if provided
+              // Extract metadata for segment analysis
+              let segmentReason = 'unknown';
+              let segmentDuration = 0;
               if (message.metadata) {
                 const { duration, reason, overlapMs } = message.metadata;
+                segmentReason = reason || 'unknown';
+                segmentDuration = duration || 0;
                 console.log(`[Backend] Audio segment: ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms`);
               }
+              
+              // Determine segment type
+              const isRollingFlush = segmentReason.startsWith('rolling_flush');
+              const isQueuePressure = segmentReason === 'queue_pressure';
+              const isSilence = segmentReason.startsWith('silence');
               
               const targetLangName = LANGUAGE_NAMES[message.targetLang || currentTargetLang] || message.targetLang || 'English';
               const sourceLangName = LANGUAGE_NAMES[message.sourceLang || currentSourceLang] || message.sourceLang || 'auto-detect';
               const isStreaming = message.streaming || false;
               
-              // Track if we need to update system instruction for language change
+              // Start or continue audio stream
               if (!isStreamingAudio) {
-                console.log(`[Backend] Starting new audio stream: ${sourceLangName} → ${targetLangName}`);
+                console.log(`[Backend] 🎤 Starting continuous audio stream: ${sourceLangName} → ${targetLangName}`);
                 isStreamingAudio = true;
+                geminiHasResponded = false; // Reset for new stream
                 streamStartTime = Date.now();
-                
-                // Apply pre-emptive stop: reduce by 500ms for buffer
-                const userMaxDuration = maxStreamDuration;
-                const actualMaxDuration = userMaxDuration - EARLY_STOP_BUFFER;
-                console.log(`[Backend] Max stream duration: ${userMaxDuration}ms (using ${actualMaxDuration}ms with ${EARLY_STOP_BUFFER}ms buffer)`);
-                
-                maxStreamTimer = setTimeout(() => {
-                  console.log('[Backend] Max stream duration reached, forcing cutoff');
-                  triggerGracefulAudioEnd();
-                }, actualMaxDuration);
               }
               
               // Send audio chunk using realtimeInput API with PCM format
-              // PCM format is required - WebM is not supported
-              // Specify sample rate: 16000 Hz, 16-bit, mono
-              // NO separate text instruction - the system instruction handles translation
               const audioMessage = {
                 realtimeInput: {
                   audio: {
@@ -669,22 +695,68 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
                 }
               };
               
-              console.log(`[Backend] Sending audio chunk via realtimeInput.audio (streaming: ${isStreaming})`);
+              // Debug: Log audio data size
+              const audioDataSize = message.audioData ? message.audioData.length : 0;
+              console.log(`[Backend] Sending audio chunk: ${audioDataSize} chars base64, format: PCM 16kHz, streaming: ${isStreaming}`);
               geminiWs.send(JSON.stringify(audioMessage));
               
               // Track last audio time for silence detection
               lastAudioTime = Date.now();
               
-              // Clear existing idle timer and set a new one (this resets on each audio chunk)
-              if (audioEndTimer) {
-                clearTimeout(audioEndTimer);
-              }
-              
-              // If we haven't received more audio in AUDIO_END_TIMEOUT ms, end the stream
-              audioEndTimer = setTimeout(() => {
-                console.log('[Backend] Audio silence detected, sending audioStreamEnd');
+              // INTELLIGENT STRATEGY: Balance between continuous speech and Gemini capacity
+              if (isRollingFlush || isSilence) {
+                const streamDuration = Date.now() - streamStartTime;
+                
+                // INTELLIGENT BREAKPOINT: If Gemini has started responding AND we have enough content
+                if (geminiHasResponded && streamDuration >= minSegmentDuration) {
+                  console.log(`[Backend] 🎯 Intelligent breakpoint: Gemini responding after ${streamDuration}ms - completing turn`);
+                  triggerGracefulAudioEnd();
+                  break; // Exit to prevent setting more timers
+                }
+                
+                console.log('[Backend] 🔄 Accumulating audio - stream remains open');
+                
+                // SAFETY: Hard limit (12s) - prevents extreme overload but allows longer segments
+                // Timer does NOT reset with each chunk - it's absolute from stream start
+                if (!maxStreamTimer && streamDuration < 12000) {
+                  const remainingTime = 12000 - streamDuration;
+                  maxStreamTimer = setTimeout(() => {
+                    console.log('[Backend] ⏰ Hard limit (12s) - completing turn to prevent overload');
+                    triggerGracefulAudioEnd();
+                  }, remainingTime);
+                }
+                
+                // IDLE DETECTION: Complete turn based on actual silence (no new audio)
+                // For silence segments: wait longer to confirm pause (3s)
+                // For rolling flush: check for idle (2.5s)
+                // Longer timeouts prevent breaking during natural test pauses
+                const idleTimeout = isSilence ? 3000 : 2500;
+                if (audioEndTimer) clearTimeout(audioEndTimer);
+                audioEndTimer = setTimeout(() => {
+                  console.log(`[Backend] 🔇 No audio for ${idleTimeout}ms - completing turn`);
+                  triggerGracefulAudioEnd();
+                }, idleTimeout);
+                
+              } else if (isQueuePressure) {
+                console.log('[Backend] ⚠️  Queue pressure - forcing immediate completion');
                 triggerGracefulAudioEnd();
-              }, AUDIO_END_TIMEOUT);
+                
+                if (audioEndTimer) {
+                  clearTimeout(audioEndTimer);
+                  audioEndTimer = null;
+                }
+                if (maxStreamTimer) {
+                  clearTimeout(maxStreamTimer);
+                  maxStreamTimer = null;
+                }
+              } else {
+                // Unknown segment type - use conservative timeout
+                if (audioEndTimer) clearTimeout(audioEndTimer);
+                audioEndTimer = setTimeout(() => {
+                  console.log('[Backend] 🔇 Fallback timeout - completing turn');
+                  triggerGracefulAudioEnd();
+                }, AUDIO_END_TIMEOUT);
+              }
               
             } else if (!setupComplete) {
               // Queue audio if setup not complete yet
@@ -763,6 +835,7 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
       
       // Reset state
       isStreamingAudio = false;
+      geminiHasResponded = false;
       setupComplete = false;
       transcriptBuffer = '';
       messageQueue = [];
