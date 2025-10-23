@@ -33,9 +33,48 @@ export async function handleHostConnection(clientWs, sessionId) {
   let isStreamingAudio = false;
   let setupComplete = false;
   let lastAudioTime = null;
-  const AUDIO_END_TIMEOUT = 2000;
+  const AUDIO_END_TIMEOUT = 1000; // 1 second for natural speech pauses
   let audioEndTimer = null;
+  let maxStreamTimer = null;
+  let streamStartTime = null;
   let lastTranscript = '';
+  let transcriptBuffer = ''; // Buffer for accumulating streaming transcript parts
+  let audioGracePeriodTimer = null;
+  const GRACE_PERIOD = 300; // Fixed 300ms grace period for audio end
+  const EARLY_STOP_BUFFER = 500; // Stop 500ms early for complete capture
+  
+  // Timing metrics for monitoring
+  let firstAudioSentTime = null;
+  let firstResponseTime = null;
+  let totalAudioChunksReceived = 0;
+  let totalTranslationsReceived = 0;
+  
+  // Intelligent transcript merging to handle overlaps
+  const mergeTranscripts = (previous, current) => {
+    if (!previous || !current) return current || previous || '';
+    
+    const prevWords = previous.trim().split(/\s+/);
+    const currWords = current.trim().split(/\s+/);
+    
+    // Look for overlap up to 15 words
+    const maxOverlap = Math.min(15, prevWords.length, currWords.length);
+    
+    for (let k = maxOverlap; k > 1; k--) {
+      const prevTail = prevWords.slice(-k).join(' ');
+      const currHead = currWords.slice(0, k).join(' ');
+      
+      // Case-insensitive comparison for better matching
+      if (prevTail.toLowerCase() === currHead.toLowerCase()) {
+        // Found overlap - merge by keeping previous + non-overlapping current
+        const merged = prevWords.concat(currWords.slice(k)).join(' ');
+        console.log(`[Host] Merged with ${k}-word overlap: "${prevTail}"`);
+        return merged;
+      }
+    }
+    
+    // No overlap found - concatenate with space
+    return `${previous} ${current}`;
+  };
 
   // Function to send audio stream end signal
   const sendAudioStreamEnd = () => {
@@ -48,15 +87,65 @@ export async function handleHostConnection(clientWs, sessionId) {
       }));
       isStreamingAudio = false;
       lastAudioTime = null;
+      streamStartTime = null;
+      
+      // Clear all timers
+      if (audioEndTimer) {
+        clearTimeout(audioEndTimer);
+        audioEndTimer = null;
+      }
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      if (audioGracePeriodTimer) {
+        clearTimeout(audioGracePeriodTimer);
+        audioGracePeriodTimer = null;
+      }
+    }
+  };
+
+  // Function to trigger graceful audio end with grace period
+  const triggerGracefulAudioEnd = () => {
+    if (isStreamingAudio) {
+      console.log(`[Host] Triggering graceful audio end with ${GRACE_PERIOD}ms grace period`);
+      
+      // Stop accepting new audio immediately
+      isStreamingAudio = false;
+      
+      // Wait for grace period before sending audioStreamEnd
+      audioGracePeriodTimer = setTimeout(() => {
+        sendAudioStreamEnd();
+      }, GRACE_PERIOD);
     }
   };
 
   // Function to translate and broadcast transcript
   const translateAndBroadcast = async (transcript) => {
-    if (!transcript || transcript === lastTranscript) return;
+    if (!transcript) return;
+    
+    // For streaming mode, check for overlap with ONLY the last segment (not entire history)
+    let finalTranscript = transcript;
+    
+    if (lastTranscript) {
+      // Try to detect overlap with the immediate previous segment
+      const merged = mergeTranscripts(lastTranscript, transcript);
+      
+      // Only use merged result if we found an actual overlap (merged is shorter than concat)
+      if (merged.length < (lastTranscript.length + transcript.length)) {
+        // Found overlap - extract only the NEW portion
+        const newPortion = merged.substring(lastTranscript.length).trim();
+        if (newPortion) {
+          finalTranscript = newPortion;
+          console.log(`[Host] Detected overlap, sending only new portion: "${newPortion.substring(0, 50)}..."`);
+        }
+      }
+    }
+    
+    // Store this segment as the last one (for next overlap check)
     lastTranscript = transcript;
 
-    console.log(`[Host] New transcript: ${transcript.substring(0, 100)}...`);
+    console.log(`[Host] New transcript: ${finalTranscript.substring(0, 100)}...`);
 
     // Get all target languages needed
     const targetLanguages = sessionStore.getSessionLanguages(sessionId);
@@ -69,7 +158,7 @@ export async function handleHostConnection(clientWs, sessionId) {
     try {
       // Translate to all needed languages at once
       const translations = await translationManager.translateToMultipleLanguages(
-        transcript,
+        finalTranscript,
         currentSourceLang,
         targetLanguages,
         process.env.GEMINI_API_KEY
@@ -81,7 +170,7 @@ export async function handleHostConnection(clientWs, sessionId) {
       for (const [targetLang, translatedText] of Object.entries(translations)) {
         sessionStore.broadcastToListeners(sessionId, {
           type: 'translation',
-          originalText: transcript,
+          originalText: finalTranscript,
           translatedText: translatedText,
           sourceLang: currentSourceLang,
           targetLang: targetLang,
@@ -108,9 +197,10 @@ export async function handleHostConnection(clientWs, sessionId) {
     ws.on('message', async (data) => {
       try {
         const response = JSON.parse(data.toString());
+        const responseTime = Date.now();
 
         if (response.setupComplete) {
-          console.log('[Host] Gemini setup complete');
+          console.log('[Host] ✅ Gemini setup complete - ready for audio');
           setupComplete = true;
           
           // Notify host
@@ -123,7 +213,7 @@ export async function handleHostConnection(clientWs, sessionId) {
 
           // Process queued messages
           if (messageQueue.length > 0) {
-            console.log(`[Host] Processing ${messageQueue.length} queued messages`);
+            console.log(`[Host] 📤 Processing ${messageQueue.length} queued messages`);
             const queuedMessages = [...messageQueue];
             messageQueue = [];
             queuedMessages.forEach(queued => {
@@ -139,36 +229,69 @@ export async function handleHostConnection(clientWs, sessionId) {
         if (response.serverContent) {
           const serverContent = response.serverContent;
           
+          // Track first response timing
+          if (!firstResponseTime && firstAudioSentTime) {
+            firstResponseTime = responseTime;
+            const latency = responseTime - firstAudioSentTime;
+            console.log(`[Host] ⚡ First response latency: ${latency}ms`);
+          }
+          
           if (serverContent.modelTurn && serverContent.modelTurn.parts) {
+            // Accumulate all text parts into buffer
             for (const part of serverContent.modelTurn.parts) {
               if (part.text) {
-                const transcript = part.text.trim();
-                
-                // Send transcript to host
-                if (clientWs.readyState === WebSocket.OPEN) {
-                  clientWs.send(JSON.stringify({
-                    type: 'transcript',
-                    text: transcript,
-                    timestamp: Date.now()
-                  }));
-                }
-
-                // Translate and broadcast to listeners
-                await translateAndBroadcast(transcript);
+                transcriptBuffer += part.text;
+                console.log(`[Host] 📝 Received text chunk: "${part.text.substring(0, 50)}${part.text.length > 50 ? '...' : ''}"`);
               }
             }
           }
           
           if (serverContent.turnComplete) {
-            console.log('[Host] Model turn complete');
+            totalTranslationsReceived++;
+            const turnDuration = streamStartTime ? (Date.now() - streamStartTime) : 0;
+            console.log(`[Host] ✅ Turn complete (#${totalTranslationsReceived}) - Duration: ${turnDuration}ms`);
+            
+            // Now send the complete buffered transcript
+            if (transcriptBuffer.trim()) {
+              const completeTranscript = transcriptBuffer.trim();
+              const transcriptLength = completeTranscript.length;
+              
+              console.log(`[Host] 📋 Complete transcript (${transcriptLength} chars): "${completeTranscript.substring(0, 100)}${transcriptLength > 100 ? '...' : ''}"`);
+              
+              // Send complete transcript to host
+              if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(JSON.stringify({
+                  type: 'transcript',
+                  text: completeTranscript,
+                  timestamp: Date.now()
+                }));
+              }
+
+              // Translate and broadcast complete sentence
+              const translateStartTime = Date.now();
+              await translateAndBroadcast(completeTranscript);
+              const translateDuration = Date.now() - translateStartTime;
+              console.log(`[Host] 🌐 Translation broadcast completed in ${translateDuration}ms`);
+              
+              // Clear buffer for next turn
+              transcriptBuffer = '';
+            }
             
             if (audioEndTimer) {
               clearTimeout(audioEndTimer);
               audioEndTimer = null;
             }
             
+            if (maxStreamTimer) {
+              clearTimeout(maxStreamTimer);
+              maxStreamTimer = null;
+            }
+            
             isStreamingAudio = false;
             lastAudioTime = null;
+            streamStartTime = null;
+            firstAudioSentTime = null;
+            firstResponseTime = null;
             
             if (clientWs.readyState === WebSocket.OPEN) {
               clientWs.send(JSON.stringify({
@@ -179,7 +302,7 @@ export async function handleHostConnection(clientWs, sessionId) {
           }
         }
       } catch (error) {
-        console.error('[Host] Error processing Gemini response:', error);
+        console.error('[Host] ❌ Error processing Gemini response:', error);
       }
     });
 
@@ -189,9 +312,19 @@ export async function handleHostConnection(clientWs, sessionId) {
       isStreamingAudio = false;
       setupComplete = false;
       lastAudioTime = null;
+      streamStartTime = null;
+      transcriptBuffer = '';
       if (audioEndTimer) {
         clearTimeout(audioEndTimer);
         audioEndTimer = null;
+      }
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      if (audioGracePeriodTimer) {
+        clearTimeout(audioGracePeriodTimer);
+        audioGracePeriodTimer = null;
       }
       
       if (code === 1011 && reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -270,6 +403,13 @@ export async function handleHostConnection(clientWs, sessionId) {
             sessionStore.updateSourceLanguage(sessionId, currentSourceLang);
           }
           
+          if (message.maxStreamDuration) {
+            sessionStore.updateMaxStreamDuration(sessionId, message.maxStreamDuration);
+          }
+          
+          // Reset transcript history on init
+          lastTranscript = '';
+          
           console.log(`[Host] Initialized with source language: ${currentSourceLang}`);
           
           if (clientWs.readyState === WebSocket.OPEN) {
@@ -284,9 +424,32 @@ export async function handleHostConnection(clientWs, sessionId) {
 
         case 'audio':
           if (geminiWs && geminiWs.readyState === WebSocket.OPEN && setupComplete) {
+            totalAudioChunksReceived++;
+            
+            // Log segment metadata if provided
+            if (message.metadata) {
+              const { duration, reason, overlapMs, sendId, queueSize } = message.metadata;
+              console.log(`[Host] 📥 Audio chunk #${totalAudioChunksReceived} (send #${sendId || '?'}): ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms, queue: ${queueSize || '?'}`);
+            }
+            
             if (!isStreamingAudio) {
-              console.log('[Host] Starting audio stream');
+              console.log('[Host] 🎤 Starting NEW audio stream');
               isStreamingAudio = true;
+              streamStartTime = Date.now();
+              firstAudioSentTime = Date.now();
+              
+              // Get max stream duration from session settings
+              const userMaxDuration = sessionStore.getMaxStreamDuration(sessionId) || 3000;
+              
+              // Apply pre-emptive stop: reduce by 500ms for buffer
+              const actualMaxDuration = userMaxDuration - EARLY_STOP_BUFFER;
+              console.log(`[Host] ⏱️  Max stream duration: ${userMaxDuration}ms (using ${actualMaxDuration}ms with ${EARLY_STOP_BUFFER}ms buffer)`);
+              
+              // Set hard timeout for max stream duration
+              maxStreamTimer = setTimeout(() => {
+                console.log('[Host] ⏰ Max stream duration reached, forcing cutoff');
+                triggerGracefulAudioEnd();
+              }, actualMaxDuration);
             }
             
             const audioMessage = {
@@ -298,14 +461,24 @@ export async function handleHostConnection(clientWs, sessionId) {
               }
             };
             
+            const sendTime = Date.now();
             geminiWs.send(JSON.stringify(audioMessage));
+            const sendDuration = Date.now() - sendTime;
+            
+            if (sendDuration > 10) {
+              console.log(`[Host] ⚠️  Audio send took ${sendDuration}ms (should be <10ms)`);
+            }
+            
             lastAudioTime = Date.now();
             
+            // Reset idle timeout (this resets on each audio chunk)
             if (audioEndTimer) clearTimeout(audioEndTimer);
             audioEndTimer = setTimeout(() => {
-              sendAudioStreamEnd();
+              console.log('[Host] 🔇 Silence detected, triggering audio end');
+              triggerGracefulAudioEnd();
             }, AUDIO_END_TIMEOUT);
           } else if (!setupComplete && messageQueue.length < 10) {
+            console.log(`[Host] 📋 Queuing audio (setup not complete), queue size: ${messageQueue.length + 1}`);
             messageQueue.push({ type: 'audio', message });
           }
           break;
@@ -315,7 +488,14 @@ export async function handleHostConnection(clientWs, sessionId) {
             clearTimeout(audioEndTimer);
             audioEndTimer = null;
           }
-          sendAudioStreamEnd();
+          if (maxStreamTimer) {
+            clearTimeout(maxStreamTimer);
+            maxStreamTimer = null;
+          }
+          triggerGracefulAudioEnd();
+          
+          // Reset transcript history when audio stream ends
+          lastTranscript = '';
           break;
       }
     } catch (error) {
@@ -331,6 +511,18 @@ export async function handleHostConnection(clientWs, sessionId) {
       clearTimeout(audioEndTimer);
       audioEndTimer = null;
     }
+    
+    if (maxStreamTimer) {
+      clearTimeout(maxStreamTimer);
+      maxStreamTimer = null;
+    }
+    
+    if (audioGracePeriodTimer) {
+      clearTimeout(audioGracePeriodTimer);
+      audioGracePeriodTimer = null;
+    }
+    
+    transcriptBuffer = '';
     
     if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
       geminiWs.close();

@@ -154,8 +154,43 @@ wss.on("connection", async (clientWs, req) => {
   let isStreamingAudio = false;
   let setupComplete = false;
   let lastAudioTime = null;
-  const AUDIO_END_TIMEOUT = 2000; // 2 seconds of silence to end turn
+  const AUDIO_END_TIMEOUT = 1000; // 1 second of silence to end turn
   let audioEndTimer = null;
+  let maxStreamTimer = null;
+  let streamStartTime = null;
+  let maxStreamDuration = 3000; // Default 3 seconds
+  let transcriptBuffer = ''; // Buffer for accumulating streaming transcript parts
+  let audioGracePeriodTimer = null;
+  const GRACE_PERIOD = 300; // Fixed 300ms grace period for audio end
+  const EARLY_STOP_BUFFER = 500; // Stop 500ms early for complete capture
+  
+  // Intelligent transcript merging to handle overlaps (solo mode)
+  let previousTranscript = '';
+  const mergeTranscripts = (previous, current) => {
+    if (!previous || !current) return current || previous || '';
+    
+    const prevWords = previous.trim().split(/\s+/);
+    const currWords = current.trim().split(/\s+/);
+    
+    // Look for overlap up to 15 words
+    const maxOverlap = Math.min(15, prevWords.length, currWords.length);
+    
+    for (let k = maxOverlap; k > 1; k--) {
+      const prevTail = prevWords.slice(-k).join(' ');
+      const currHead = currWords.slice(0, k).join(' ');
+      
+      // Case-insensitive comparison for better matching
+      if (prevTail.toLowerCase() === currHead.toLowerCase()) {
+        // Found overlap - merge by keeping previous + non-overlapping current
+        const merged = prevWords.concat(currWords.slice(k)).join(' ');
+        console.log(`[Backend] Merged with ${k}-word overlap: "${prevTail}"`);
+        return merged;
+      }
+    }
+    
+    // No overlap found - concatenate with space
+    return `${previous} ${current}`;
+  };
 
   // Function to send audio stream end signal using realtimeInput API
   const sendAudioStreamEnd = () => {
@@ -171,6 +206,36 @@ wss.on("connection", async (clientWs, req) => {
       
       isStreamingAudio = false;
       lastAudioTime = null;
+      streamStartTime = null;
+      
+      // Clear all timers
+      if (audioEndTimer) {
+        clearTimeout(audioEndTimer);
+        audioEndTimer = null;
+      }
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      if (audioGracePeriodTimer) {
+        clearTimeout(audioGracePeriodTimer);
+        audioGracePeriodTimer = null;
+      }
+    }
+  };
+
+  // Function to trigger graceful audio end with grace period
+  const triggerGracefulAudioEnd = () => {
+    if (isStreamingAudio) {
+      console.log(`[Backend] Triggering graceful audio end with ${GRACE_PERIOD}ms grace period`);
+      
+      // Stop accepting new audio immediately
+      isStreamingAudio = false;
+      
+      // Wait for grace period before sending audioStreamEnd
+      audioGracePeriodTimer = setTimeout(() => {
+        sendAudioStreamEnd();
+      }, GRACE_PERIOD);
     }
   };
 
@@ -220,19 +285,14 @@ wss.on("connection", async (clientWs, req) => {
           const serverContent = response.serverContent;
           
           if (serverContent.modelTurn && serverContent.modelTurn.parts) {
+            // Accumulate all parts into buffer
             serverContent.modelTurn.parts.forEach(part => {
-              if (part.text && clientWs.readyState === WebSocket.OPEN) {
-                // Send text translation to client
-                clientWs.send(JSON.stringify({
-                  type: 'translation',
-                  originalText: '[Audio/Text input]',
-                  translatedText: part.text,
-                  timestamp: Date.now()
-                }));
+              if (part.text) {
+                transcriptBuffer += part.text;
               }
-
+              
               if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.includes('audio')) {
-                // Send audio translation to client
+                // Audio responses still sent immediately (not common in our use case)
                 if (clientWs.readyState === WebSocket.OPEN) {
                   clientWs.send(JSON.stringify({
                     type: 'audio_response',
@@ -245,9 +305,45 @@ wss.on("connection", async (clientWs, req) => {
             });
           }
           
-          // Handle turn complete - reset state for next turn
+          // Handle turn complete - send buffered translation
           if (serverContent.turnComplete) {
             console.log('[Backend] Model turn complete - ready for next user input');
+            
+            // Send complete buffered translation
+            if (transcriptBuffer.trim() && clientWs.readyState === WebSocket.OPEN) {
+              const currentTranscript = transcriptBuffer.trim();
+              
+              // For streaming mode, check for overlap with ONLY the last segment (not entire history)
+              let finalTranscript = currentTranscript;
+              
+              if (previousTranscript) {
+                // Try to detect overlap with the immediate previous segment
+                const merged = mergeTranscripts(previousTranscript, currentTranscript);
+                
+                // Only use merged result if we found an actual overlap (merged is shorter than concat)
+                if (merged.length < (previousTranscript.length + currentTranscript.length)) {
+                  // Found overlap - extract only the NEW portion
+                  const newPortion = merged.substring(previousTranscript.length).trim();
+                  if (newPortion) {
+                    finalTranscript = newPortion;
+                    console.log(`[Backend] Detected overlap, sending only new portion: "${newPortion.substring(0, 50)}..."`);
+                  }
+                }
+              }
+              
+              // Store this segment as the last one (for next overlap check)
+              previousTranscript = currentTranscript;
+              
+              clientWs.send(JSON.stringify({
+                type: 'translation',
+                originalText: '',
+                translatedText: finalTranscript,
+                timestamp: Date.now()
+              }));
+              
+              // Clear buffer for next turn
+              transcriptBuffer = '';
+            }
             
             // Clear any pending audio end timer
             if (audioEndTimer) {
@@ -255,9 +351,16 @@ wss.on("connection", async (clientWs, req) => {
               audioEndTimer = null;
             }
             
+            // Clear max stream timer
+            if (maxStreamTimer) {
+              clearTimeout(maxStreamTimer);
+              maxStreamTimer = null;
+            }
+            
             // Reset streaming state for next turn
             isStreamingAudio = false;
             lastAudioTime = null;
+            streamStartTime = null;
             
             // Notify client that model is ready for next input
             if (clientWs.readyState === WebSocket.OPEN) {
@@ -290,9 +393,19 @@ wss.on("connection", async (clientWs, req) => {
       isStreamingAudio = false;
       setupComplete = false;
       lastAudioTime = null;
+      streamStartTime = null;
+      transcriptBuffer = '';
       if (audioEndTimer) {
         clearTimeout(audioEndTimer);
         audioEndTimer = null;
+      }
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      if (audioGracePeriodTimer) {
+        clearTimeout(audioGracePeriodTimer);
+        audioGracePeriodTimer = null;
       }
       
       // Check for persistent quota errors
@@ -409,6 +522,13 @@ CRITICAL RULES:
 6. Preserve the meaning, tone, and context of the original speech
 7. Maintain proper grammar and natural phrasing in ${targetLangName}
 
+TRANSLATION QUALITY:
+- Prioritize complete sentences when possible
+- Maintain proper punctuation and sentence boundaries
+- If audio cuts mid-sentence, translate what you hear accurately
+- Do not add words or complete incomplete thoughts
+- Use proper capitalization and punctuation marks (. ! ?)
+
 Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, respond ONLY with the ${targetLangName} translation, nothing else.`
               }]
             }
@@ -448,6 +568,14 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
             if (message.targetLang) {
               currentTargetLang = message.targetLang;
             }
+            
+            if (message.maxStreamDuration) {
+              maxStreamDuration = message.maxStreamDuration;
+              console.log(`[Backend] Max stream duration updated to ${maxStreamDuration}ms`);
+            }
+            
+            // Reset transcript history on init
+            previousTranscript = '';
             
             const sourceLangName = LANGUAGE_NAMES[currentSourceLang] || currentSourceLang;
             const targetLangName = LANGUAGE_NAMES[currentTargetLang] || currentTargetLang;
@@ -501,6 +629,12 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
           case 'audio':
             // Send audio to Gemini using realtimeInput API for proper streaming
             if (geminiWs && geminiWs.readyState === WebSocket.OPEN && setupComplete) {
+              // Log segment metadata if provided
+              if (message.metadata) {
+                const { duration, reason, overlapMs } = message.metadata;
+                console.log(`[Backend] Audio segment: ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms`);
+              }
+              
               const targetLangName = LANGUAGE_NAMES[message.targetLang || currentTargetLang] || message.targetLang || 'English';
               const sourceLangName = LANGUAGE_NAMES[message.sourceLang || currentSourceLang] || message.sourceLang || 'auto-detect';
               const isStreaming = message.streaming || false;
@@ -509,6 +643,17 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
               if (!isStreamingAudio) {
                 console.log(`[Backend] Starting new audio stream: ${sourceLangName} → ${targetLangName}`);
                 isStreamingAudio = true;
+                streamStartTime = Date.now();
+                
+                // Apply pre-emptive stop: reduce by 500ms for buffer
+                const userMaxDuration = maxStreamDuration;
+                const actualMaxDuration = userMaxDuration - EARLY_STOP_BUFFER;
+                console.log(`[Backend] Max stream duration: ${userMaxDuration}ms (using ${actualMaxDuration}ms with ${EARLY_STOP_BUFFER}ms buffer)`);
+                
+                maxStreamTimer = setTimeout(() => {
+                  console.log('[Backend] Max stream duration reached, forcing cutoff');
+                  triggerGracefulAudioEnd();
+                }, actualMaxDuration);
               }
               
               // Send audio chunk using realtimeInput API with PCM format
@@ -530,7 +675,7 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
               // Track last audio time for silence detection
               lastAudioTime = Date.now();
               
-              // Clear existing timer and set a new one
+              // Clear existing idle timer and set a new one (this resets on each audio chunk)
               if (audioEndTimer) {
                 clearTimeout(audioEndTimer);
               }
@@ -538,7 +683,7 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
               // If we haven't received more audio in AUDIO_END_TIMEOUT ms, end the stream
               audioEndTimer = setTimeout(() => {
                 console.log('[Backend] Audio silence detected, sending audioStreamEnd');
-                sendAudioStreamEnd();
+                triggerGracefulAudioEnd();
               }, AUDIO_END_TIMEOUT);
               
             } else if (!setupComplete) {
@@ -565,7 +710,14 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
               clearTimeout(audioEndTimer);
               audioEndTimer = null;
             }
-            sendAudioStreamEnd();
+            if (maxStreamTimer) {
+              clearTimeout(maxStreamTimer);
+              maxStreamTimer = null;
+            }
+            triggerGracefulAudioEnd();
+            
+            // Reset transcript history when audio stream ends
+            previousTranscript = '';
             break;
 
           default:
@@ -589,6 +741,16 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
         audioEndTimer = null;
       }
       
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      
+      if (audioGracePeriodTimer) {
+        clearTimeout(audioGracePeriodTimer);
+        audioGracePeriodTimer = null;
+      }
+      
       // Close Gemini connection
       if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
         geminiWs.close();
@@ -602,6 +764,7 @@ Example: If you hear audio saying "Hello, how are you?" in ${sourceLangName}, re
       // Reset state
       isStreamingAudio = false;
       setupComplete = false;
+      transcriptBuffer = '';
       messageQueue = [];
     });
 

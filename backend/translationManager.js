@@ -294,6 +294,13 @@ CRITICAL RULES:
 7. Preserve the exact meaning and phrasing from the audio
 8. Maintain proper grammar and punctuation in ${sourceLangName}
 
+TRANSCRIPTION QUALITY:
+- Prioritize complete sentences when possible
+- Maintain proper punctuation and sentence boundaries
+- If audio cuts mid-sentence, transcribe what you hear accurately
+- Do not add words or complete incomplete thoughts
+- Use proper capitalization and punctuation marks (. ! ?)
+
 Example: If you hear audio saying "Hello everyone, welcome to today's sermon" in ${sourceLangName}, respond ONLY with:
 "Hello everyone, welcome to today's sermon"
 

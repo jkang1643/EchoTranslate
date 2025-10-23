@@ -25,6 +25,7 @@ class SessionStore {
       listeners: new Map(), // Map<socketId, ListenerData>
       languageGroups: new Map(), // Map<targetLang, Set<socketId>>
       sourceLang: 'en',
+      maxStreamDuration: 3000, // Default 3 seconds
       createdAt: Date.now(),
       lastActivity: Date.now(),
       isActive: false
@@ -190,6 +191,26 @@ class SessionStore {
       session.sourceLang = sourceLang;
       session.lastActivity = Date.now();
     }
+  }
+
+  /**
+   * Update maximum stream duration for a session
+   */
+  updateMaxStreamDuration(sessionId, duration) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.maxStreamDuration = duration;
+      session.lastActivity = Date.now();
+      console.log(`[SessionStore] Updated maxStreamDuration for session ${session.sessionCode} to ${duration}ms`);
+    }
+  }
+
+  /**
+   * Get maximum stream duration for a session
+   */
+  getMaxStreamDuration(sessionId) {
+    const session = this.sessions.get(sessionId);
+    return session ? session.maxStreamDuration : 3000; // Default 3 seconds
   }
 
   /**

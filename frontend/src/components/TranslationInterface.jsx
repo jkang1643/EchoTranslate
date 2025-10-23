@@ -71,6 +71,7 @@ function TranslationInterface({ onBackToHome }) {
   const [showSettings, setShowSettings] = useState(false)
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [latency, setLatency] = useState(0)
+  const [maxStreamDuration, setMaxStreamDuration] = useState(3) // Default 3 seconds
 
   // Dynamically determine WebSocket URL based on frontend URL
   const getWebSocketUrl = () => {
@@ -132,26 +133,29 @@ function TranslationInterface({ onBackToHome }) {
       sendMessage({
         type: 'init',
         sourceLang,
-        targetLang
+        targetLang,
+        maxStreamDuration: maxStreamDuration * 1000 // Convert to milliseconds
       })
     } else {
       setIsConnected(false)
     }
-  }, [connectionState, sourceLang, targetLang])
+  }, [connectionState, sourceLang, targetLang, maxStreamDuration])
 
   const handleStartListening = async () => {
     if (!isConnected) return
     
     try {
       // Enable streaming mode (second parameter = true)
-      await startRecording((audioChunk) => {
-        // Send audio chunk to backend in real-time with language information
+      await startRecording((audioChunk, metadata) => {
+        // Send audio chunk to backend in real-time with language information and metadata
         sendMessage({
           type: 'audio',
           audioData: audioChunk,
           sourceLang: sourceLang,
           targetLang: targetLang,
-          streaming: true
+          streaming: true,
+          // Include segment metadata for intelligent backend handling
+          metadata: metadata || {}
         })
       }, true) // true = streaming mode
       setIsListening(true)
@@ -161,7 +165,25 @@ function TranslationInterface({ onBackToHome }) {
   }
 
   const handleStopListening = () => {
-    stopRecording()
+    // Pass the audio chunk callback to flush remaining audio
+    stopRecording((audioChunk, metadata) => {
+      if (audioChunk) {
+        sendMessage({
+          type: 'audio',
+          audioData: audioChunk,
+          sourceLang: sourceLang,
+          targetLang: targetLang,
+          streaming: true,
+          metadata: metadata || {}
+        })
+      }
+    })
+    
+    // Signal audio end to backend
+    sendMessage({
+      type: 'audio_end'
+    })
+    
     setIsListening(false)
   }
 
@@ -177,7 +199,22 @@ function TranslationInterface({ onBackToHome }) {
       sendMessage({
         type: 'init',
         sourceLang: type === 'source' ? language : sourceLang,
-        targetLang: type === 'target' ? language : targetLang
+        targetLang: type === 'target' ? language : targetLang,
+        maxStreamDuration: maxStreamDuration * 1000 // Convert to milliseconds
+      })
+    }
+  }
+
+  const handleMaxStreamDurationChange = (duration) => {
+    setMaxStreamDuration(duration)
+    
+    // Update backend with new duration
+    if (isConnected) {
+      sendMessage({
+        type: 'init',
+        sourceLang,
+        targetLang,
+        maxStreamDuration: duration * 1000 // Convert to milliseconds
       })
     }
   }
@@ -263,16 +300,56 @@ function TranslationInterface({ onBackToHome }) {
         {showSettings && (
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <h3 className="font-semibold text-gray-900 mb-3">Settings</h3>
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center space-x-2">
+            <div className="space-y-4">
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={audioEnabled}
+                    onChange={(e) => setAudioEnabled(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-700">Enable audio output</span>
+                </label>
+              </div>
+              
+              {/* Max Stream Duration Slider */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Translation Update Interval
+                  </label>
+                  <span className="text-sm font-semibold text-indigo-600">
+                    {maxStreamDuration}s
+                  </span>
+                </div>
+                
                 <input
-                  type="checkbox"
-                  checked={audioEnabled}
-                  onChange={(e) => setAudioEnabled(e.target.checked)}
-                  className="rounded"
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="0.5"
+                  value={maxStreamDuration}
+                  onChange={(e) => handleMaxStreamDurationChange(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  disabled={isListening}
                 />
-                <span className="text-sm text-gray-700">Enable audio output</span>
-              </label>
+                
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>1s (Fast)</span>
+                  <span>10s (Slow)</span>
+                </div>
+                
+                <p className="text-xs text-gray-600 mt-2">
+                  Controls how frequently translations are sent. Lower values provide faster updates 
+                  but may cut sentences. Higher values wait longer for complete sentences.
+                  {isListening && (
+                    <span className="block text-amber-600 mt-1">
+                      ⚠️ Stop listening to change this setting
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
           </div>
         )}

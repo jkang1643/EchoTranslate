@@ -109,6 +109,8 @@ export function HostPage({ onBackToHome }) {
   const [listenerCount, setListenerCount] = useState(0);
   const [languageStats, setLanguageStats] = useState({});
   const [error, setError] = useState('');
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [maxStreamDuration, setMaxStreamDuration] = useState(3); // Default 3 seconds
 
   const wsRef = useRef(null);
   const { startRecording, stopRecording, isRecording, audioLevel } = useAudioCapture();
@@ -169,7 +171,8 @@ export function HostPage({ onBackToHome }) {
       // Send initialization
       ws.send(JSON.stringify({
         type: 'init',
-        sourceLang: sourceLang
+        sourceLang: sourceLang,
+        maxStreamDuration: maxStreamDuration * 1000 // Convert to milliseconds
       }));
     };
     
@@ -231,12 +234,13 @@ export function HostPage({ onBackToHome }) {
     }
 
     try {
-      await startRecording((audioData) => {
+      await startRecording((audioData, metadata) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: 'audio',
             audioData: audioData,
-            streaming: true
+            streaming: true,
+            metadata: metadata || {}
           }));
         }
       }, true); // streaming mode
@@ -250,7 +254,17 @@ export function HostPage({ onBackToHome }) {
   };
 
   const handleStopBroadcast = () => {
-    stopRecording();
+    // Pass callback to flush remaining audio
+    stopRecording((audioData, metadata) => {
+      if (audioData && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'audio',
+          audioData: audioData,
+          streaming: true,
+          metadata: metadata || {}
+        }));
+      }
+    });
     
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -267,7 +281,20 @@ export function HostPage({ onBackToHome }) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'init',
-        sourceLang: lang
+        sourceLang: lang,
+        maxStreamDuration: maxStreamDuration * 1000 // Convert to milliseconds
+      }));
+    }
+  };
+
+  const handleMaxStreamDurationChange = (duration) => {
+    setMaxStreamDuration(duration);
+    
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'init',
+        sourceLang: sourceLang,
+        maxStreamDuration: duration * 1000 // Convert to milliseconds
       }));
     }
   };
@@ -324,6 +351,61 @@ export function HostPage({ onBackToHome }) {
               selectedLanguage={sourceLang}
               onLanguageChange={handleSourceLangChange}
             />
+          </div>
+
+          {/* Advanced Settings */}
+          <div className="mb-6">
+            <button
+              onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800 mb-2"
+            >
+              <span>{showAdvancedSettings ? '▼' : '▶'}</span>
+              <span>Advanced Settings</span>
+            </button>
+            
+            {showAdvancedSettings && (
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="space-y-4">
+                  {/* Max Stream Duration Slider */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        Translation Update Interval
+                      </label>
+                      <span className="text-sm font-semibold text-indigo-600">
+                        {maxStreamDuration}s
+                      </span>
+                    </div>
+                    
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={maxStreamDuration}
+                      onChange={(e) => handleMaxStreamDurationChange(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                      disabled={isStreaming}
+                    />
+                    
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>1s (Fast)</span>
+                      <span>10s (Slow)</span>
+                    </div>
+                    
+                    <p className="text-xs text-gray-600 mt-2">
+                      Controls how frequently translations are sent. Lower values provide faster updates 
+                      but may cut sentences. Higher values wait longer for complete sentences.
+                      {isStreaming && (
+                        <span className="block text-amber-600 mt-1">
+                          ⚠️ Stop broadcasting to change this setting
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Broadcast Controls */}
