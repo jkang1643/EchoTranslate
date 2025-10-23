@@ -33,14 +33,14 @@ export async function handleHostConnection(clientWs, sessionId) {
   let isStreamingAudio = false;
   let setupComplete = false;
   let lastAudioTime = null;
-  const AUDIO_END_TIMEOUT = 1000; // 1 second for natural speech pauses
+  const AUDIO_END_TIMEOUT = 3000; // 3 seconds for natural speech pauses
   let audioEndTimer = null;
   let maxStreamTimer = null;
   let streamStartTime = null;
   let lastTranscript = '';
   let transcriptBuffer = ''; // Buffer for accumulating streaming transcript parts
   let audioGracePeriodTimer = null;
-  const GRACE_PERIOD = 300; // Fixed 300ms grace period for audio end
+  const GRACE_PERIOD = 500; // 500ms grace period for audio end
   const EARLY_STOP_BUFFER = 500; // Stop 500ms early for complete capture
   
   // Timing metrics for monitoring
@@ -475,23 +475,23 @@ export async function handleHostConnection(clientWs, sessionId) {
               // Continue accumulating audio in the same stream
               console.log('[Host] 🔄 Accumulating audio - stream remains open');
               
-              // Set reasonable max duration (8s) - prevents Gemini overload
+              // Set max duration (18s) - prevents Gemini overload while allowing longer segments
               // Timer does NOT reset with each chunk - it's absolute from stream start
               const streamDuration = Date.now() - streamStartTime;
-              if (!maxStreamTimer && streamDuration < 8000) {
-                // Set timer for remaining time until 8s total
-                const remainingTime = 8000 - streamDuration;
+              if (!maxStreamTimer && streamDuration < 18000) {
+                // Set timer for remaining time until 18s total
+                const remainingTime = 18000 - streamDuration;
                 maxStreamTimer = setTimeout(() => {
-                  console.log('[Host] ⏰ Max accumulation (8s) - completing turn to prevent Gemini overload');
+                  console.log('[Host] ⏰ Max accumulation (18s) - completing turn to prevent Gemini overload');
                   sendAudioStreamEnd();
                 }, remainingTime);
               }
               
               // ALSO complete turn based on actual idle (no new audio)
-              // For silence segments: wait to confirm pause (3s)
-              // For rolling flush: check for idle (2.5s)
-              // Longer timeouts prevent breaking during natural test pauses
-              const idleTimeout = isSilence ? 3000 : 2500;
+              // For silence segments: wait to confirm pause (5s)
+              // For rolling flush: check for idle (4s)
+              // Longer timeouts prevent breaking during continuous speech
+              const idleTimeout = isSilence ? 5000 : 4000;
               if (audioEndTimer) clearTimeout(audioEndTimer);
               audioEndTimer = setTimeout(() => {
                 console.log(`[Host] 🔇 No audio for ${idleTimeout}ms - completing turn`);

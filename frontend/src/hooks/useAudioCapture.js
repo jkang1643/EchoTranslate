@@ -32,14 +32,14 @@ export function useAudioCapture() {
   const sendCountRef = useRef(0)
   
   // Configurable parameters (can be overridden via settings)
-  // Default: Optimized for preaching/sermons
+  // Default: Optimized for continuous speech (sermons, presentations, etc.)
   const configRef = useRef({
-    maxQueueSize: 10,
-    maxSegmentMs: 1500,
-    minSegmentMs: 500,
-    silenceTimeoutMs: 700,
+    maxQueueSize: 15,
+    maxSegmentMs: 6000, // 6 seconds - longer segments for better context
+    minSegmentMs: 1000, // 1 second minimum
+    silenceTimeoutMs: 2000, // 2 seconds - allows natural pauses
     silenceThreshold: 0.005,
-    overlapMs: 150,
+    overlapMs: 300, // 300ms overlap for better continuity
     workerIntervalMs: 100,
     sampleRate: 16000
   })

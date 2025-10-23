@@ -154,14 +154,14 @@ wss.on("connection", async (clientWs, req) => {
   let isStreamingAudio = false;
   let setupComplete = false;
   let lastAudioTime = null;
-  const AUDIO_END_TIMEOUT = 1000; // 1 second of silence to end turn
+  const AUDIO_END_TIMEOUT = 3000; // 3 seconds for natural speech pauses
   let audioEndTimer = null;
   let maxStreamTimer = null;
   let streamStartTime = null;
   let maxStreamDuration = 3000; // Default 3 seconds
   let transcriptBuffer = ''; // Buffer for accumulating streaming transcript parts
   let audioGracePeriodTimer = null;
-  const GRACE_PERIOD = 300; // Fixed 300ms grace period for audio end
+  const GRACE_PERIOD = 500; // 500ms grace period for audio end
   const EARLY_STOP_BUFFER = 500; // Stop 500ms early for complete capture
   
   // Intelligent segmentation: Track when Gemini starts responding
@@ -716,21 +716,21 @@ Example: If you hear "Hello, how are you?", output ONLY the ${targetLangName} tr
                 
                 console.log('[Backend] 🔄 Accumulating audio - stream remains open');
                 
-                // SAFETY: Hard limit (12s) - prevents extreme overload but allows longer segments
+                // SAFETY: Hard limit (18s) - prevents extreme overload but allows longer segments
                 // Timer does NOT reset with each chunk - it's absolute from stream start
-                if (!maxStreamTimer && streamDuration < 12000) {
-                  const remainingTime = 12000 - streamDuration;
+                if (!maxStreamTimer && streamDuration < 18000) {
+                  const remainingTime = 18000 - streamDuration;
                   maxStreamTimer = setTimeout(() => {
-                    console.log('[Backend] ⏰ Hard limit (12s) - completing turn to prevent overload');
+                    console.log('[Backend] ⏰ Hard limit (18s) - completing turn to prevent overload');
                     triggerGracefulAudioEnd();
                   }, remainingTime);
                 }
                 
                 // IDLE DETECTION: Complete turn based on actual silence (no new audio)
-                // For silence segments: wait longer to confirm pause (3s)
-                // For rolling flush: check for idle (2.5s)
-                // Longer timeouts prevent breaking during natural test pauses
-                const idleTimeout = isSilence ? 3000 : 2500;
+                // For silence segments: wait longer to confirm pause (5s)
+                // For rolling flush: check for idle (4s)
+                // Longer timeouts prevent breaking during continuous speech
+                const idleTimeout = isSilence ? 5000 : 4000;
                 if (audioEndTimer) clearTimeout(audioEndTimer);
                 audioEndTimer = setTimeout(() => {
                   console.log(`[Backend] 🔇 No audio for ${idleTimeout}ms - completing turn`);
