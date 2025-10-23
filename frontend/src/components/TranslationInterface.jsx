@@ -6,6 +6,7 @@ import { ConnectionStatus } from './ConnectionStatus'
 import { Header } from './Header'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAudioCapture } from '../hooks/useAudioCapture'
+import AudioDebugSettings from './AudioDebugSettings'
 
 const LANGUAGES = [
   { code: 'en', name: 'English' },
@@ -72,6 +73,31 @@ function TranslationInterface({ onBackToHome }) {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [latency, setLatency] = useState(0)
   const [maxStreamDuration, setMaxStreamDuration] = useState(3) // Default 3 seconds
+  
+  // Audio debug settings with localStorage persistence
+  // Default: Optimized for preaching/sermons
+  const getInitialAudioSettings = () => {
+    try {
+      const saved = localStorage.getItem('audioDebugSettings');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (err) {
+      console.error('Failed to load audio settings:', err);
+    }
+    return {
+      maxQueueSize: 10,
+      maxSegmentMs: 1500,
+      minSegmentMs: 500,
+      silenceTimeoutMs: 700,
+      silenceThreshold: 0.005,
+      overlapMs: 150,
+      workerIntervalMs: 100,
+      sampleRate: 16000
+    };
+  };
+  
+  const [audioSettings, setAudioSettings] = useState(getInitialAudioSettings())
 
   // Dynamically determine WebSocket URL based on frontend URL
   const getWebSocketUrl = () => {
@@ -110,8 +136,18 @@ function TranslationInterface({ onBackToHome }) {
     startRecording,
     stopRecording,
     isRecording,
-    audioLevel
+    audioLevel,
+    updateConfig
   } = useAudioCapture()
+  
+  // Save audio settings to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('audioDebugSettings', JSON.stringify(audioSettings));
+    } catch (err) {
+      console.error('Failed to save audio settings:', err);
+    }
+  }, [audioSettings])
 
   useEffect(() => {
     connect()
@@ -145,7 +181,7 @@ function TranslationInterface({ onBackToHome }) {
     if (!isConnected) return
     
     try {
-      // Enable streaming mode (second parameter = true)
+      // Enable streaming mode (second parameter = true, third parameter = custom audio settings)
       await startRecording((audioChunk, metadata) => {
         // Send audio chunk to backend in real-time with language information and metadata
         sendMessage({
@@ -157,10 +193,19 @@ function TranslationInterface({ onBackToHome }) {
           // Include segment metadata for intelligent backend handling
           metadata: metadata || {}
         })
-      }, true) // true = streaming mode
+      }, true, audioSettings) // true = streaming mode, audioSettings = custom config
       setIsListening(true)
     } catch (error) {
       console.error('Failed to start recording:', error)
+    }
+  }
+  
+  const handleAudioSettingsChange = (newSettings) => {
+    setAudioSettings(newSettings);
+    // If listening, update config in real-time
+    if (isListening) {
+      updateConfig(newSettings);
+      console.log('[TranslationInterface] Updated audio config during streaming:', newSettings);
     }
   }
 
@@ -349,6 +394,14 @@ function TranslationInterface({ onBackToHome }) {
                     </span>
                   )}
                 </p>
+              </div>
+              
+              {/* Audio Settings - Integrated */}
+              <div className="border-t border-gray-200 pt-4">
+                <AudioDebugSettings
+                  settings={audioSettings}
+                  onSettingsChange={handleAudioSettingsChange}
+                />
               </div>
             </div>
           </div>

@@ -17,7 +17,6 @@ export function useAudioCapture() {
   
   // CAPTURE THREAD: Continuously writes to this queue (never awaits)
   const audioQueueRef = useRef([])  // Queue of PCM chunks (Int16Array)
-  const MAX_QUEUE_SIZE = 30         // Safety cap (~8s of audio @ 256ms chunks)
   
   // WORKER THREAD: Drains queue and batches for sending
   const workerTimerRef = useRef(null)
@@ -30,15 +29,19 @@ export function useAudioCapture() {
   // Active sends tracking (for overlapping sends)
   const activeSendsRef = useRef(0)
   const sendCountRef = useRef(0)
-
-  // Tunable parameters for adaptive streaming
-  const SAMPLE_RATE = 16000
-  const MAX_SEGMENT_MS = 4000      // Flush every 3-4s max
-  const MIN_SEGMENT_MS = 1000      // Minimum 1s before sending
-  const SILENCE_TIMEOUT = 1500     // 1.5s of silence triggers flush
-  const SILENCE_THRESHOLD = 0.015  // RMS threshold for silence detection
-  const OVERLAP_MS = 400           // 400ms overlap between segments
-  const WORKER_INTERVAL = 200      // Worker runs every 200ms
+  
+  // Configurable parameters (can be overridden via settings)
+  // Default: Optimized for preaching/sermons
+  const configRef = useRef({
+    maxQueueSize: 10,
+    maxSegmentMs: 1500,
+    minSegmentMs: 500,
+    silenceTimeoutMs: 700,
+    silenceThreshold: 0.005,
+    overlapMs: 150,
+    workerIntervalMs: 100,
+    sampleRate: 16000
+  })
 
   // Calculate RMS (Root Mean Square) energy for VAD
   const calculateRMS = (samples) => {
@@ -55,19 +58,20 @@ export function useAudioCapture() {
   // This NEVER awaits or blocks - just pushes to queue
   // ====================================================================
   const processAudioChunk = (pcmChunk) => {
+    const config = configRef.current
     const queueSize = audioQueueRef.current.length
     
-    if (queueSize < MAX_QUEUE_SIZE) {
+    if (queueSize < config.maxQueueSize) {
       audioQueueRef.current.push(pcmChunk)
       chunkCountRef.current++
       
       // Log every 10 chunks for monitoring
       if (chunkCountRef.current % 10 === 0) {
-        const queueDuration = audioQueueRef.current.reduce((sum, chunk) => sum + chunk.length, 0) / SAMPLE_RATE * 1000
+        const queueDuration = audioQueueRef.current.reduce((sum, chunk) => sum + chunk.length, 0) / config.sampleRate * 1000
         console.log(`[📦 Capture] Queue: ${queueSize} chunks, ${queueDuration.toFixed(0)}ms, Total captured: ${chunkCountRef.current}`)
       }
     } else {
-      console.warn(`[⚠️  Capture] Queue full (${MAX_QUEUE_SIZE}) - dropping oldest chunk`)
+      console.warn(`[⚠️  Capture] Queue full (${config.maxQueueSize}) - dropping oldest chunk`)
       audioQueueRef.current.shift() // Drop oldest
       audioQueueRef.current.push(pcmChunk)
     }
@@ -78,6 +82,7 @@ export function useAudioCapture() {
   // Drains queue, batches segments, sends to Gemini (fire-and-forget)
   // ====================================================================
   const translationWorker = (onAudioChunk) => {
+    const config = configRef.current
     const now = performance.now()
     const queueSize = audioQueueRef.current.length
     
@@ -94,18 +99,18 @@ export function useAudioCapture() {
     }
     
     // Check if we should flush the current batch
-    const batchDuration = (currentBatchRef.current.length / SAMPLE_RATE) * 1000
+    const batchDuration = (currentBatchRef.current.length / config.sampleRate) * 1000
     const timeSinceBatchStart = now - batchStartTimeRef.current
     const timeSinceLastSpeech = now - lastSpeechTimeRef.current
     
     let flushReason = null
     
     // Flush conditions:
-    if (batchDuration >= (MAX_SEGMENT_MS * 0.75) && timeSinceBatchStart >= MAX_SEGMENT_MS) {
-      flushReason = 'max_duration_4s'
-    } else if (timeSinceLastSpeech > SILENCE_TIMEOUT && batchDuration >= MIN_SEGMENT_MS) {
-      flushReason = 'silence_1.5s'
-    } else if (batchDuration >= (MAX_SEGMENT_MS * 1.2)) {
+    if (batchDuration >= (config.maxSegmentMs * 0.75) && timeSinceBatchStart >= config.maxSegmentMs) {
+      flushReason = `max_duration_${(config.maxSegmentMs / 1000).toFixed(1)}s`
+    } else if (timeSinceLastSpeech > config.silenceTimeoutMs && batchDuration >= config.minSegmentMs) {
+      flushReason = `silence_${(config.silenceTimeoutMs / 1000).toFixed(1)}s`
+    } else if (batchDuration >= (config.maxSegmentMs * 1.2)) {
       flushReason = 'overflow_protection'
     }
     
@@ -119,15 +124,17 @@ export function useAudioCapture() {
   // Allows overlapping sends - never blocks capture or worker
   // ====================================================================
   const flushBatch = (onAudioChunk, reason) => {
+    const config = configRef.current
+    
     if (currentBatchRef.current.length === 0) {
       return
     }
     
-    const batchDuration = (currentBatchRef.current.length / SAMPLE_RATE) * 1000
+    const batchDuration = (currentBatchRef.current.length / config.sampleRate) * 1000
     
     // Don't send if too short (unless it's a stop signal)
-    if (batchDuration < MIN_SEGMENT_MS && reason !== 'stop') {
-      console.log(`[⏭️  Worker] Skip: ${batchDuration.toFixed(0)}ms too short (min: ${MIN_SEGMENT_MS}ms)`)
+    if (batchDuration < config.minSegmentMs && reason !== 'stop') {
+      console.log(`[⏭️  Worker] Skip: ${batchDuration.toFixed(0)}ms too short (min: ${config.minSegmentMs}ms)`)
       return
     }
     
@@ -139,7 +146,7 @@ export function useAudioCapture() {
     console.log(`[🚀 Flush #${sendId}] START: ${batchDuration.toFixed(0)}ms, reason: "${reason}", queue: ${queueSizeAtFlush} chunks, active sends: ${activeSendsRef.current}`)
     
     // Calculate overlap and prepare next batch immediately
-    const overlapSamples = Math.floor((SAMPLE_RATE * OVERLAP_MS) / 1000)
+    const overlapSamples = Math.floor((config.sampleRate * config.overlapMs) / 1000)
     const overlapData = Array.from(batchSnapshot.slice(-Math.min(overlapSamples, batchSnapshot.length)))
     
     // Reset batch with overlap BEFORE async processing
@@ -169,7 +176,7 @@ export function useAudioCapture() {
         onAudioChunk(base64, {
           duration: batchDuration,
           reason: reason,
-          overlapMs: OVERLAP_MS,
+          overlapMs: config.overlapMs,
           timestamp: Date.now(),
           sendId: sendId,
           queueSize: queueSizeAtFlush
@@ -186,11 +193,18 @@ export function useAudioCapture() {
     }, 0)
   }
 
-  const startRecording = useCallback(async (onAudioChunk, streaming = false) => {
+  const startRecording = useCallback(async (onAudioChunk, streaming = false, customConfig = null) => {
     try {
+      // Update configuration if provided
+      if (customConfig) {
+        configRef.current = { ...configRef.current, ...customConfig }
+      }
+      
+      const config = configRef.current
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
-          sampleRate: 16000,
+          sampleRate: config.sampleRate,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -201,7 +215,7 @@ export function useAudioCapture() {
 
       // Set up audio context for PCM capture and level monitoring
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000
+        sampleRate: config.sampleRate
       })
       const source = audioContextRef.current.createMediaStreamSource(stream)
       analyserRef.current = audioContextRef.current.createAnalyser()
@@ -241,8 +255,9 @@ export function useAudioCapture() {
         sendCountRef.current = 0
         
         console.log(`[🎙️  AudioCapture] DOUBLE-BUFFER MODE STARTED`)
-        console.log(`[🎙️  AudioCapture] Capture → Queue (non-blocking) | Worker drains every ${WORKER_INTERVAL}ms`)
-        console.log(`[🎙️  AudioCapture] Max segment: ${MAX_SEGMENT_MS}ms | Overlap: ${OVERLAP_MS}ms`)
+        console.log(`[🎙️  AudioCapture] Capture → Queue (non-blocking) | Worker drains every ${config.workerIntervalMs}ms`)
+        console.log(`[🎙️  AudioCapture] Max segment: ${config.maxSegmentMs}ms | Overlap: ${config.overlapMs}ms`)
+        console.log(`[🎙️  AudioCapture] Queue size: ${config.maxQueueSize} | Silence: ${config.silenceTimeoutMs}ms`)
         
         // ================================================================
         // CAPTURE LOOP: Non-blocking audio processing
@@ -263,7 +278,7 @@ export function useAudioCapture() {
           
           // Adaptive threshold using exponential moving average
           averageEnergyRef.current = 0.95 * averageEnergyRef.current + 0.05 * rms
-          const threshold = Math.max(SILENCE_THRESHOLD, averageEnergyRef.current * 1.5)
+          const threshold = Math.max(config.silenceThreshold, averageEnergyRef.current * 1.5)
           
           // Update last speech time if energy exceeds threshold
           if (rms > threshold) {
@@ -280,10 +295,10 @@ export function useAudioCapture() {
         // ================================================================
         workerTimerRef.current = setInterval(() => {
           translationWorker(onAudioChunk)
-        }, WORKER_INTERVAL)
+        }, config.workerIntervalMs)
         
         console.log(`[✅ AudioCapture] Capture thread started (non-blocking)`)
-        console.log(`[✅ AudioCapture] Worker thread started (${WORKER_INTERVAL}ms interval)`)
+        console.log(`[✅ AudioCapture] Worker thread started (${config.workerIntervalMs}ms interval)`)
         
         source.connect(processor)
         processor.connect(audioContextRef.current.destination)
@@ -325,6 +340,7 @@ export function useAudioCapture() {
   }, [])
 
   const stopRecording = useCallback((onAudioChunk) => {
+    const config = configRef.current
     console.log(`[🛑 AudioCapture] STOPPING RECORDING`)
     
     // Step 1: Stop worker thread immediately
@@ -351,7 +367,7 @@ export function useAudioCapture() {
       
       // Flush final batch if it has data
       if (currentBatchRef.current.length > 0) {
-        const finalDuration = (currentBatchRef.current.length / SAMPLE_RATE) * 1000
+        const finalDuration = (currentBatchRef.current.length / config.sampleRate) * 1000
         console.log(`[🔚 Final Flush] ${finalDuration.toFixed(0)}ms remaining in batch, queue: ${audioQueueRef.current.length}`)
         flushBatch(onAudioChunk, 'stop')
       } else {
@@ -398,10 +414,23 @@ export function useAudioCapture() {
     setIsRecording(false)
   }, [isRecording])
 
+  // Method to update configuration dynamically
+  const updateConfig = useCallback((newConfig) => {
+    configRef.current = { ...configRef.current, ...newConfig }
+    console.log(`[🔧 AudioCapture] Config updated:`, configRef.current)
+  }, [])
+
+  // Method to get current configuration
+  const getConfig = useCallback(() => {
+    return { ...configRef.current }
+  }, [])
+
   return {
     startRecording,
     stopRecording,
     isRecording,
-    audioLevel
+    audioLevel,
+    updateConfig,
+    getConfig
   }
 }

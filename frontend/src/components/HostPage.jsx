@@ -8,6 +8,7 @@ import { useAudioCapture } from '../hooks/useAudioCapture';
 import { Header } from './Header';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LanguageSelector } from './LanguageSelector';
+import AudioDebugSettings from './AudioDebugSettings';
 
 // Dynamically determine backend URL based on frontend URL
 // If accessing via network IP, use the same IP for backend
@@ -111,9 +112,43 @@ export function HostPage({ onBackToHome }) {
   const [error, setError] = useState('');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [maxStreamDuration, setMaxStreamDuration] = useState(3); // Default 3 seconds
+  
+  // Audio debug settings with localStorage persistence
+  // Default: Optimized for preaching/sermons
+  const getInitialAudioSettings = () => {
+    try {
+      const saved = localStorage.getItem('audioDebugSettings');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (err) {
+      console.error('Failed to load audio settings:', err);
+    }
+    return {
+      maxQueueSize: 10,
+      maxSegmentMs: 1500,
+      minSegmentMs: 500,
+      silenceTimeoutMs: 700,
+      silenceThreshold: 0.005,
+      overlapMs: 150,
+      workerIntervalMs: 100,
+      sampleRate: 16000
+    };
+  };
+  
+  const [audioSettings, setAudioSettings] = useState(getInitialAudioSettings());
 
   const wsRef = useRef(null);
-  const { startRecording, stopRecording, isRecording, audioLevel } = useAudioCapture();
+  const { startRecording, stopRecording, isRecording, audioLevel, updateConfig } = useAudioCapture();
+  
+  // Save audio settings to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('audioDebugSettings', JSON.stringify(audioSettings));
+    } catch (err) {
+      console.error('Failed to save audio settings:', err);
+    }
+  }, [audioSettings]);
 
   // Create session on mount
   useEffect(() => {
@@ -243,13 +278,22 @@ export function HostPage({ onBackToHome }) {
             metadata: metadata || {}
           }));
         }
-      }, true); // streaming mode
+      }, true, audioSettings); // streaming mode with custom audio settings
       
       setIsStreaming(true);
       setError('');
     } catch (err) {
       console.error('Failed to start recording:', err);
       setError('Failed to access microphone. Please check permissions.');
+    }
+  };
+  
+  const handleAudioSettingsChange = (newSettings) => {
+    setAudioSettings(newSettings);
+    // If recording, update config in real-time
+    if (isStreaming) {
+      updateConfig(newSettings);
+      console.log('[HostPage] Updated audio config during streaming:', newSettings);
     }
   };
 
@@ -402,6 +446,14 @@ export function HostPage({ onBackToHome }) {
                         </span>
                       )}
                     </p>
+                  </div>
+                  
+                  {/* Audio Settings - Integrated */}
+                  <div className="border-t border-gray-200 pt-4">
+                    <AudioDebugSettings
+                      settings={audioSettings}
+                      onSettingsChange={handleAudioSettingsChange}
+                    />
                   </div>
                 </div>
               </div>
