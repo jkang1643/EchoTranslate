@@ -4,11 +4,11 @@
  * 
  * PROPRIETARY AND CONFIDENTIAL
  * 
- * MIGRATION NOTES:
- * - Replaced Gemini Live API with OpenAI Realtime API
- * - Uses OpenAI Realtime for continuous speech transcription
- * - Maintains all existing features and session management
- * - Updated environment variable from GEMINI_API_KEY to OPENAI_API_KEY
+ * ARCHITECTURE:
+ * - Google Cloud Speech-to-Text for live streaming transcription with partial results
+ * - OpenAI Chat API for translation of final transcripts
+ * - WebSocket-based real-time communication
+ * - Session management for multi-user live translation
  * 
  * This software contains proprietary and confidential information.
  * Unauthorized copying, modification, distribution, or use of this
@@ -147,8 +147,8 @@ wss.on("connection", async (clientWs, req) => {
   }
 
   // Fall back to solo mode for backward compatibility
-  // UNIFIED: Now uses OpenAIRealtimePool just like host mode
-  console.log("[Backend] Solo mode connection - using OpenAIRealtimePool");
+  // Uses Google Speech for transcription + OpenAI for translation
+  console.log("[Backend] Solo mode connection - using Google Speech + OpenAI Translation");
   handleSoloMode(clientWs);
 });
 
@@ -283,8 +283,10 @@ app.get('/health', (req, res) => {
     status: 'ok',
     activeSessions: activeSessions.size,
     liveTranslationSessions: sessionStore.getAllSessions().length,
-    model: 'gpt-realtime',
-    apiProvider: 'OpenAI',
+    transcriptionProvider: 'Google Cloud Speech-to-Text',
+    transcriptionModel: 'Chirp 3 (latest_long)',
+    translationProvider: 'OpenAI',
+    translationModel: 'gpt-4o',
     endpoint: '/translate'
   });
 });
@@ -349,13 +351,33 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// MIGRATION NOTE: Updated startup messages for OpenAI Realtime
-console.log("[Backend] Starting OpenAI Realtime Translation Server...");
+// Startup messages for dual-service architecture
+console.log("[Backend] Starting Dual-Service Translation Server...");
 console.log("[Backend] WebSocket endpoint: ws://localhost:" + port + "/translate");
-console.log("[Backend] API Provider: OpenAI Realtime API");
-console.log("[Backend] Model: gpt-realtime (latest)");
-console.log("[Backend] API Key configured:", process.env.OPENAI_API_KEY ? 'Yes ✓' : 'No ✗ (ERROR!)');
-if (!process.env.OPENAI_API_KEY) {
-  console.error("[Backend] ERROR: OPENAI_API_KEY not found in environment variables!");
-  console.error("[Backend] Please create a .env file with: OPENAI_API_KEY=your_api_key_here");
+console.log("[Backend] ===== TRANSCRIPTION SERVICE =====");
+console.log("[Backend] Provider: Google Cloud Speech-to-Text");
+console.log("[Backend] Model: Chirp 3 (latest_long)");
+console.log("[Backend] Features: Live streaming with partial results");
+console.log("[Backend] ===== TRANSLATION SERVICE =====");
+console.log("[Backend] Provider: OpenAI");
+console.log("[Backend] Model: gpt-4o");
+console.log("[Backend] ===== API KEYS =====");
+console.log("[Backend] OpenAI API Key:", process.env.OPENAI_API_KEY ? 'Yes ✓' : 'No ✗ (WARNING: Translation disabled)');
+
+// Check Google Cloud authentication
+if (process.env.GOOGLE_SPEECH_API_KEY) {
+  console.log("[Backend] Google Cloud: API Key configured ✓ (simple mode)");
+} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.log("[Backend] Google Cloud: Service Account JSON configured ✓ (secure mode)");
+} else {
+  console.log("[Backend] Google Cloud: Using default credentials (GCP environment)");
 }
+
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("[Backend] WARNING: OPENAI_API_KEY not found - translation will not work!");
+}
+if (!process.env.GOOGLE_SPEECH_API_KEY && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.warn("[Backend] WARNING: No Google Cloud credentials found - transcription may not work!");
+  console.warn("[Backend] Set either GOOGLE_SPEECH_API_KEY or GOOGLE_APPLICATION_CREDENTIALS");
+}
+console.log("[Backend] =====================================");

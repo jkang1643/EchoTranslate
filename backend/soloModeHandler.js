@@ -1,21 +1,21 @@
 /**
- * Solo Mode Handler - Uses OpenAI Realtime Session Pool for parallel processing
+ * Solo Mode Handler - Uses Google Cloud Speech for transcription + OpenAI for translation
  * 
- * MIGRATION NOTES:
- * - Replaced GeminiSessionPool with OpenAIRealtimePool
- * - Uses OpenAI Realtime API for real-time transcription/translation
- * - Maintains non-blocking audio processing with parallel sessions
- * - Same client interface and message protocol
+ * ARCHITECTURE:
+ * - Google Cloud Speech-to-Text for streaming transcription with live partials
+ * - OpenAI Chat API for translation of final transcripts
+ * - Live partial results shown immediately for responsive UX
+ * - Final results translated and displayed
  */
 
-import { OpenAIRealtimePool } from './openaiRealtimePool.js';
+import { GoogleSpeechStream } from './googleSpeechStream.js';
 import WebSocket from 'ws';
 import translationManager from './translationManager.js';
 
 export async function handleSoloMode(clientWs) {
-  console.log("[SoloMode] ⚡ Connection using OpenAI Realtime API");
+  console.log("[SoloMode] ⚡ Connection using Google Speech + OpenAI Translation");
 
-  let sessionPool = null;
+  let speechStream = null;
   let currentSourceLang = 'en';
   let currentTargetLang = 'es';
   let legacySessionId = `session_${Date.now()}`;
@@ -44,51 +44,151 @@ export async function handleSoloMode(clientWs) {
           const isTranscription = currentSourceLang === currentTargetLang;
           console.log(`[SoloMode] Languages: ${currentSourceLang} → ${currentTargetLang} (${isTranscription ? 'TRANSCRIPTION' : 'TRANSLATION'} mode)`);
           
-          // Reinitialize pool if languages changed
-          const languagesChanged = (prevSourceLang !== currentSourceLang) || (prevTargetLang !== currentTargetLang);
-          if (languagesChanged && sessionPool) {
-            console.log('[SoloMode] 🔄 Languages changed! Destroying old pool...');
-            sessionPool.destroy();
-            sessionPool = null;
-            // Small delay to ensure WebSocket connections are fully closed
-            await new Promise(resolve => setTimeout(resolve, 500));
+          // Reinitialize stream if source language changed
+          const languagesChanged = (prevSourceLang !== currentSourceLang);
+          if (languagesChanged && speechStream) {
+            console.log('[SoloMode] 🔄 Source language changed! Destroying old stream...');
+            speechStream.destroy();
+            speechStream = null;
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
           
-          // Initialize OpenAI Realtime pool if needed
-          if (!sessionPool) {
+          // Initialize Google Speech stream if needed
+          if (!speechStream) {
             try {
-              // MIGRATION NOTE: Use OpenAI API key instead of Gemini
-              if (!process.env.OPENAI_API_KEY) {
-                throw new Error('OPENAI_API_KEY not configured in environment');
-              }
+              console.log(`[SoloMode] 🚀 Creating Google Speech stream for ${currentSourceLang}...`);
+              speechStream = new GoogleSpeechStream();
               
-              console.log(`[SoloMode] 🚀 Creating NEW OpenAI pool with languages: ${currentSourceLang} → ${currentTargetLang}`);
-              sessionPool = new OpenAIRealtimePool(process.env.OPENAI_API_KEY, 1); // 1 session (solo speaker)
-              
-              // CRITICAL: Always transcribe only (like Host Mode), never translate directly
-              await sessionPool.initialize(currentSourceLang, currentSourceLang); // TRANSCRIPTION ONLY
+              // Initialize with source language for transcription
+              await speechStream.initialize(currentSourceLang);
               
               const isTranscriptionOnly = currentSourceLang === currentTargetLang;
               
-              // Set up result callback with support for partial transcripts
-              sessionPool.onResult(async (transcriptText, sequence, isPartial = false) => {
+              // Set up error callback
+              speechStream.onError((error) => {
+                console.error('[SoloMode] Speech stream error:', error);
+                if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+                  clientWs.send(JSON.stringify({
+                    type: 'warning',
+                    message: 'Transcription service restarting...',
+                    code: error.code
+                  }));
+                }
+              });
+              
+              // Translation throttling for partials
+              let lastPartialTranslation = '';
+              let lastPartialTranslationTime = 0;
+              let pendingPartialTranslation = null;
+              const PARTIAL_TRANSLATION_THROTTLE = 800; // Translate partials max every 800ms
+              
+              // Set up result callback - handles both partials and finals
+              speechStream.onResult(async (transcriptText, isPartial) => {
                 if (!clientWs || clientWs.readyState !== WebSocket.OPEN) return;
                 
                 if (isPartial) {
-                  // Live partial transcript - INSTANT, NO TRANSLATION
-                  console.log(`[SoloMode] 🔵 PARTIAL: "${transcriptText.substring(0, 50)}..."`);
+                  // Live partial transcript - send original immediately
+                  // console.log(`[SoloMode] 🔵 PARTIAL: "${transcriptText.substring(0, 50)}..."`);
+                  
+                  // Always send original text immediately (no delay)
                   clientWs.send(JSON.stringify({
                     type: 'translation',
                     originalText: transcriptText,
-                    translatedText: transcriptText, // Show source language for partials
+                    translatedText: transcriptText, // Default to source text
                     timestamp: Date.now(),
                     sequenceId: -1,
                     isPartial: true,
-                    isTranscriptionOnly: isTranscriptionOnly
+                    isTranscriptionOnly: isTranscriptionOnly,
+                    hasTranslation: false // Flag that translation is pending
                   }));
+                  
+                  // If translation needed and different from source lang
+                  if (!isTranscriptionOnly && transcriptText.length > 10) {
+                    const now = Date.now();
+                    const timeSinceLastTranslation = now - lastPartialTranslationTime;
+                    
+                    // Throttle: Only translate if enough time passed and text changed significantly
+                    if (timeSinceLastTranslation >= PARTIAL_TRANSLATION_THROTTLE && 
+                        transcriptText !== lastPartialTranslation) {
+                      
+                      // Cancel any pending translation
+                      if (pendingPartialTranslation) {
+                        clearTimeout(pendingPartialTranslation);
+                      }
+                      
+                      // Translate the partial text
+                      lastPartialTranslationTime = now;
+                      lastPartialTranslation = transcriptText;
+                      
+                      try {
+                        console.log(`[SoloMode] 🔄 Translating partial: "${transcriptText.substring(0, 40)}..."`);
+                        const translations = await translationManager.translateToMultipleLanguages(
+                          transcriptText,
+                          currentSourceLang,
+                          [currentTargetLang],
+                          process.env.OPENAI_API_KEY
+                        );
+                        
+                        const translatedText = translations[currentTargetLang] || transcriptText;
+                        
+                        // Send updated translation
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(JSON.stringify({
+                            type: 'translation',
+                            originalText: transcriptText,
+                            translatedText: translatedText,
+                            timestamp: Date.now(),
+                            sequenceId: -1,
+                            isPartial: true,
+                            isTranscriptionOnly: false,
+                            hasTranslation: true // Flag that this includes translation
+                          }));
+                        }
+                      } catch (error) {
+                        console.error(`[SoloMode] Partial translation error:`, error);
+                      }
+                    } else {
+                      // Schedule delayed translation if text keeps updating
+                      if (pendingPartialTranslation) {
+                        clearTimeout(pendingPartialTranslation);
+                      }
+                      
+                      pendingPartialTranslation = setTimeout(async () => {
+                        if (transcriptText === lastPartialTranslation) return;
+                        
+                        try {
+                          console.log(`[SoloMode] ⏱️ Delayed translating partial: "${transcriptText.substring(0, 40)}..."`);
+                          const translations = await translationManager.translateToMultipleLanguages(
+                            transcriptText,
+                            currentSourceLang,
+                            [currentTargetLang],
+                            process.env.OPENAI_API_KEY
+                          );
+                          
+                          const translatedText = translations[currentTargetLang] || transcriptText;
+                          lastPartialTranslation = transcriptText;
+                          
+                          if (clientWs.readyState === WebSocket.OPEN) {
+                            clientWs.send(JSON.stringify({
+                              type: 'translation',
+                              originalText: transcriptText,
+                              translatedText: translatedText,
+                              timestamp: Date.now(),
+                              sequenceId: -1,
+                              isPartial: true,
+                              isTranscriptionOnly: false,
+                              hasTranslation: true
+                            }));
+                          }
+                        } catch (error) {
+                          console.error(`[SoloMode] Delayed partial translation error:`, error);
+                        }
+                      }, PARTIAL_TRANSLATION_THROTTLE);
+                    }
+                  }
                 } else {
                   // Final transcript
-                  console.log(`[SoloMode] 📝 FINAL Transcript #${sequence}: "${transcriptText.substring(0, 50)}..."`);
+                  console.log(`[SoloMode] 📝 FINAL Transcript: "${transcriptText.substring(0, 50)}..."`);
                   
                   if (isTranscriptionOnly) {
                     // Same language - just send transcript
@@ -97,11 +197,11 @@ export async function handleSoloMode(clientWs) {
                       originalText: '',
                       translatedText: transcriptText,
                       timestamp: Date.now(),
-                      sequenceId: sequence,
+                      sequenceId: Date.now(),
                       isPartial: false
                     }));
                   } else {
-                    // Different language - translate the transcript (like Host Mode)
+                    // Different language - translate the transcript
                     try {
                       const translations = await translationManager.translateToMultipleLanguages(
                         transcriptText,
@@ -111,14 +211,14 @@ export async function handleSoloMode(clientWs) {
                       );
                       
                       const translatedText = translations[currentTargetLang] || transcriptText;
-                      console.log(`[SoloMode] 📤 Sending translation #${sequence}: "${translatedText.substring(0, 50)}..."`);
+                      console.log(`[SoloMode] 📤 Sending translation: "${translatedText.substring(0, 50)}..."`);
                       
                       clientWs.send(JSON.stringify({
                         type: 'translation',
                         originalText: transcriptText,
                         translatedText: translatedText,
                         timestamp: Date.now(),
-                        sequenceId: sequence,
+                        sequenceId: Date.now(),
                         isPartial: false
                       }));
                     } catch (error) {
@@ -129,7 +229,7 @@ export async function handleSoloMode(clientWs) {
                         originalText: transcriptText,
                         translatedText: `[Translation error: ${error.message}]`,
                         timestamp: Date.now(),
-                        sequenceId: sequence,
+                        sequenceId: Date.now(),
                         isPartial: false
                       }));
                     }
@@ -137,9 +237,9 @@ export async function handleSoloMode(clientWs) {
                 }
               });
               
-              console.log('[SoloMode] ✅ OpenAI Realtime pool initialized and ready');
+              console.log('[SoloMode] ✅ Google Speech stream initialized and ready');
             } catch (error) {
-              console.error('[SoloMode] Failed to initialize OpenAI Realtime pool:', error);
+              console.error('[SoloMode] Failed to initialize Google Speech stream:', error);
               if (clientWs.readyState === WebSocket.OPEN) {
                 clientWs.send(JSON.stringify({
                   type: 'error',
@@ -161,34 +261,27 @@ export async function handleSoloMode(clientWs) {
           break;
 
         case 'audio':
-          // Process audio through session pool - NON-BLOCKING
-          if (sessionPool) {
-            const { duration, reason, overlapMs } = message.metadata || {};
-            console.log(`[SoloMode] 🎤 Audio: ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms`);
-            
-            // Non-blocking - always accepts audio
-            await sessionPool.processAudio(message.audioData);
-            
-            // Log pool stats every 10 chunks
-            const stats = sessionPool.getStats();
-            if (stats.nextSequence % 10 === 0) {
-              console.log(`[SoloMode] 📊 Pool stats: ${stats.busySessions}/${stats.totalSessions} busy, ${stats.totalQueuedItems} queued, ${stats.pendingResults} pending`);
-            }
+          // Process audio through Google Speech stream
+          if (speechStream) {
+            // Stream audio to Google Speech for transcription
+            await speechStream.processAudio(message.audioData);
           } else {
-            console.warn('[SoloMode] Received audio before pool initialization');
+            console.warn('[SoloMode] Received audio before stream initialization');
           }
           break;
           
         case 'audio_end':
           console.log('[SoloMode] Audio stream ended');
-          // Pool continues processing queued items automatically
+          if (speechStream) {
+            await speechStream.endAudio();
+          }
           break;
         
         case 'force_commit':
           // Frontend requests to force-commit current turn (simulated pause)
           console.log('[SoloMode] 🔄 Force commit requested by frontend');
-          if (sessionPool) {
-            await sessionPool.forceCommit(); // Now async with delay
+          if (speechStream) {
+            await speechStream.forceCommit();
           }
           break;
           
@@ -204,9 +297,9 @@ export async function handleSoloMode(clientWs) {
   clientWs.on("close", () => {
     console.log("[SoloMode] Client disconnected");
     
-    if (sessionPool) {
-      sessionPool.destroy();
-      sessionPool = null;
+    if (speechStream) {
+      speechStream.destroy();
+      speechStream = null;
     }
   });
 
@@ -214,7 +307,7 @@ export async function handleSoloMode(clientWs) {
   if (clientWs.readyState === WebSocket.OPEN) {
     clientWs.send(JSON.stringify({
       type: 'info',
-      message: 'Connected to OpenAI Realtime. Waiting for initialization...'
+      message: 'Connected to Google Speech + OpenAI Translation. Waiting for initialization...'
     }));
   }
 }

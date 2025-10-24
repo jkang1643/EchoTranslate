@@ -14,8 +14,18 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
-  "keywords": ["translation", "gemini", "realtime", "speech", "ai", "echotranslate"],
+  "keywords": [
+    "translation",
+    "gemini",
+    "realtime",
+    "speech",
+    "ai",
+    "echotranslate"
+  ],
   "author": "EchoTranslate",
   "license": "UNLICENSED",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@google-cloud/speech": "^7.2.1"
+  }
 }

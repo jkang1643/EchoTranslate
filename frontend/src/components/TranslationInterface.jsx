@@ -72,6 +72,7 @@ function TranslationInterface({ onBackToHome }) {
   
   // CRITICAL: Separate states for live streaming vs history
   const [livePartial, setLivePartial] = useState('') // 🔴 LIVE text appearing word-by-word
+  const [livePartialOriginal, setLivePartialOriginal] = useState('') // 🔴 LIVE original (for translation mode)
   const [finalTranslations, setFinalTranslations] = useState([]) // 📝 Completed translations
   
   const [showSettings, setShowSettings] = useState(false)
@@ -93,17 +94,24 @@ function TranslationInterface({ onBackToHome }) {
       maxChars: 500,        // Force flush after 500 chars
       maxTimeMs: 15000,     // Force flush after 15 seconds
       onFlush: (flushedSentences) => {
-        // Move flushed sentences to history immediately
+        // Move flushed sentences to history with forced paint
         const joinedText = flushedSentences.join(' ').trim()
         if (joinedText) {
-          setFinalTranslations(prev => [...prev, {
-            id: Date.now() + Math.random(),
-            original: '',
-            translated: joinedText,
-            timestamp: Date.now(),
-            sequenceId: -1,
-            isSegmented: true  // Flag to indicate this was auto-segmented
-          }])
+          // Schedule flush for next tick to allow browser paint between flushes
+          // This prevents browser from batching all visual updates until VAD pause
+          setTimeout(() => {
+            flushSync(() => {
+              setFinalTranslations(prev => [...prev, {
+                id: Date.now() + Math.random(),
+                original: '',
+                translated: joinedText,
+                timestamp: Date.now(),
+                sequenceId: -1,
+                isSegmented: true  // Flag to indicate this was auto-segmented
+              }])
+            })
+            console.log(`[TranslationInterface] ✅ Flushed to history with paint: "${joinedText.substring(0, 40)}..."`)
+          }, 0)
           
           // Note: No backend force-commit needed
           // OpenAI partials are cumulative per turn - we can't control mid-turn breaks
@@ -166,41 +174,84 @@ function TranslationInterface({ onBackToHome }) {
       case 'translation':
         if (message.isPartial) {
           // 🔴 LIVE PARTIAL: Run through sentence segmenter + throttle for smooth streaming
-          const rawText = message.originalText || message.translatedText
-          const now = Date.now()
+          const isTranslationMode = sourceLang !== targetLang
+          const hasTranslation = message.hasTranslation
           
-          // Process through segmenter (auto-flushes complete sentences to history)
-          const { liveText } = segmenterRef.current.processPartial(rawText)
-          
-          // Store the segmented text
-          pendingTextRef.current = liveText
-          
-          // THROTTLE: Update max 20 times per second (50ms intervals)
-          const timeSinceLastUpdate = now - lastUpdateTimeRef.current
-          
-          if (timeSinceLastUpdate >= 50) {
-            // Immediate update with forced sync render
-            lastUpdateTimeRef.current = now
-            flushSync(() => {
-              setLivePartial(liveText)
-            })
-            console.log(`[TranslationInterface] ⚡ IMMEDIATE: "${liveText.substring(0, 30)}..." [${liveText.length}chars]`)
-          } else {
-            // Schedule delayed update
-            if (throttleTimerRef.current) {
-              clearTimeout(throttleTimerRef.current)
+          // For translation mode, show both original and translated
+          if (isTranslationMode) {
+            // Always update original immediately (transcription is instant)
+            const originalText = message.originalText
+            if (originalText) {
+              setLivePartialOriginal(originalText)
             }
             
-            throttleTimerRef.current = setTimeout(() => {
-              const latestText = pendingTextRef.current
-              if (latestText !== null) {
-                lastUpdateTimeRef.current = Date.now()
+            // Update translation (might be delayed due to throttling)
+            if (hasTranslation && message.translatedText) {
+              const translatedText = message.translatedText
+              const now = Date.now()
+              
+              pendingTextRef.current = translatedText
+              const timeSinceLastUpdate = now - lastUpdateTimeRef.current
+              
+              if (timeSinceLastUpdate >= 50) {
+                lastUpdateTimeRef.current = now
                 flushSync(() => {
-                  setLivePartial(latestText)
+                  setLivePartial(translatedText)
                 })
-                console.log(`[TranslationInterface] ⏱️ THROTTLED: "${latestText.substring(0, 30)}..." [${latestText.length}chars]`)
+              } else {
+                if (throttleTimerRef.current) {
+                  clearTimeout(throttleTimerRef.current)
+                }
+                
+                throttleTimerRef.current = setTimeout(() => {
+                  const latestText = pendingTextRef.current
+                  if (latestText !== null) {
+                    lastUpdateTimeRef.current = Date.now()
+                    flushSync(() => {
+                      setLivePartial(latestText)
+                    })
+                  }
+                }, 50)
               }
-            }, 50)
+            }
+          } else {
+            // Transcription-only mode - just show the text
+            const rawText = message.originalText || message.translatedText
+            const now = Date.now()
+            
+            // Process through segmenter (auto-flushes complete sentences to history)
+            const { liveText } = segmenterRef.current.processPartial(rawText)
+            
+            // Store the segmented text
+            pendingTextRef.current = liveText
+            
+            // THROTTLE: Update max 20 times per second (50ms intervals)
+            const timeSinceLastUpdate = now - lastUpdateTimeRef.current
+            
+            if (timeSinceLastUpdate >= 50) {
+              // Immediate update with forced sync render
+              lastUpdateTimeRef.current = now
+              flushSync(() => {
+                setLivePartial(liveText)
+              })
+              console.log(`[TranslationInterface] ⚡ IMMEDIATE: "${liveText.substring(0, 30)}..." [${liveText.length}chars]`)
+            } else {
+              // Schedule delayed update
+              if (throttleTimerRef.current) {
+                clearTimeout(throttleTimerRef.current)
+              }
+              
+              throttleTimerRef.current = setTimeout(() => {
+                const latestText = pendingTextRef.current
+                if (latestText !== null) {
+                  lastUpdateTimeRef.current = Date.now()
+                  flushSync(() => {
+                    setLivePartial(latestText)
+                  })
+                  console.log(`[TranslationInterface] ⏱️ THROTTLED: "${latestText.substring(0, 30)}..." [${latestText.length}chars]`)
+                }
+              }, 50)
+            }
           }
         } else {
           // 📝 FINAL: Process through segmenter to flush ONLY NEW text (deduplicated)
@@ -224,9 +275,15 @@ function TranslationInterface({ onBackToHome }) {
           
           // Clear live partial for next segment
           setLivePartial('')
+          setLivePartialOriginal('')
           setLatency(Date.now() - (message.timestamp || Date.now()))
         }
         break
+      case 'warning':
+        console.warn('[TranslationInterface] ⚠️ Warning:', message.message)
+        // Could show a toast notification here
+        break
+        
       case 'error':
         console.error('[TranslationInterface] ❌ Translation error:', message.message)
         // Show quota errors prominently
@@ -297,6 +354,15 @@ function TranslationInterface({ onBackToHome }) {
   const handleStopListening = () => {
     stopRecording()
     setIsListening(false)
+    
+    // Reset segmenter deduplication memory after significant stop
+    // This prevents old text from interfering with new sessions
+    setTimeout(() => {
+      if (segmenterRef.current) {
+        console.log('[TranslationInterface] 🔄 Resetting segmenter deduplication memory')
+        segmenterRef.current.reset()
+      }
+    }, 2000) // Wait 2 seconds after stop before resetting
   }
 
   const handleLanguageChange = (type, language) => {
@@ -462,9 +528,10 @@ function TranslationInterface({ onBackToHome }) {
         </div>
 
         {/* Translation Display */}
-        <TranslationDisplay
+        <TranslationDisplay 
           finalTranslations={finalTranslations}
           livePartial={livePartial}
+          livePartialOriginal={livePartialOriginal}
           audioEnabled={audioEnabled}
           isListening={isListening}
           sourceLang={sourceLang}

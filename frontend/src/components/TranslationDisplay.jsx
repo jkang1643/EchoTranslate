@@ -4,12 +4,14 @@ import { Volume2, Copy, Download } from 'lucide-react'
 function TranslationDisplay({ 
   finalTranslations, 
   livePartial, 
+  livePartialOriginal,
   audioEnabled, 
   isListening, 
   sourceLang, 
   targetLang
 }) {
   const isTranscriptionMode = sourceLang === targetLang
+  const isTranslationMode = !isTranscriptionMode
   const transcriptBoxRef = useRef(null)
   const translationBoxRef = useRef(null)
   
@@ -100,44 +102,98 @@ function TranslationDisplay({
           )}
         </div>
         
-        {/* TRANSCRIPTION BOX - Updates inline, no appending */}
-          <div 
-            ref={transcriptBoxRef}
-            className="bg-white/95 backdrop-blur rounded-xl p-6 min-h-[140px] max-h-[400px] overflow-y-auto transition-none scroll-smooth"
-          >
-            {livePartial ? (
-              <p className="text-gray-900 font-semibold text-3xl leading-relaxed tracking-wide break-words">
-                {livePartial}
-                {isListening && (
-                  <span className="inline-block w-1 h-8 ml-2 bg-blue-600 animate-pulse"></span>
-                )}
-                {/* DEBUG: Force visible change with timestamp */}
-                <span className="text-xs text-red-600 font-mono ml-2">
-                  [{livePartial.length}chars]
-                </span>
-              </p>
-            ) : (
-              <div className="flex items-center justify-center h-full min-h-[140px]">
-                <p className="text-gray-400 text-xl">
-                  {/* Always show ready state - partials will appear immediately */}
-                  {isListening ? 'Ready • Start speaking...' : 'Click "Listen" to start'}
-                </p>
+        {/* TRANSLATION MODE: Show both original and translation */}
+        {isTranslationMode ? (
+          <div className="space-y-3">
+            {/* Original Text */}
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3">
+              <div className="text-xs font-semibold text-white/70 uppercase tracking-wide mb-2">
+                Original ({sourceLang.toUpperCase()})
               </div>
-            )}
+              {livePartialOriginal ? (
+                <p className="text-white text-base leading-relaxed whitespace-pre-wrap">
+                  {livePartialOriginal}
+                  {isListening && (
+                    <span className="inline-block w-0.5 h-5 ml-1 bg-white animate-pulse"></span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-white/40 text-sm italic">Listening...</p>
+              )}
+            </div>
+            
+            {/* Translated Text */}
+            <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3 border-2 border-white/20">
+              <div className="text-xs font-semibold text-white/70 uppercase tracking-wide mb-2 flex items-center gap-2">
+                <span>Translation ({targetLang.toUpperCase()})</span>
+                {livePartial && livePartial !== livePartialOriginal && (
+                  <span className="inline-flex items-center gap-1 text-emerald-300">
+                    <span className="inline-block w-1.5 h-1.5 bg-emerald-300 rounded-full animate-pulse"></span>
+                    Live
+                  </span>
+                )}
+              </div>
+              {livePartial ? (
+                <p className="text-white text-lg font-medium leading-relaxed whitespace-pre-wrap">
+                  {livePartial}
+                  {isListening && (
+                    <span className="inline-block w-0.5 h-6 ml-1 bg-emerald-300 animate-pulse"></span>
+                  )}
+                </p>
+              ) : livePartialOriginal ? (
+                <p className="text-white/50 text-sm italic animate-pulse">Translating...</p>
+              ) : (
+                <p className="text-white/40 text-sm italic">Waiting for speech...</p>
+              )}
+            </div>
+            
+            <div className="mt-2 text-xs text-white/70 font-medium">
+              {livePartialOriginal && livePartial && livePartial !== livePartialOriginal ? (
+                <>✨ Live translation updating...</>
+              ) : livePartialOriginal ? (
+                <>⏳ Translation in progress...</>
+              ) : isListening ? (
+                <>🎤 Ready • Start speaking...</>
+              ) : (
+                <>Click "Start" to begin</>
+              )}
+            </div>
           </div>
-        
-        <div className="mt-3 text-xs text-white/80 font-medium">
-          {livePartial ? (
-            <>🔴 LIVE • Words streaming in real-time</>
-          ) : isListening ? (
-            <>Ready • Start speaking to see text appear</>
-          ) : (
-            <>Start listening to see live transcription</>
-          )}
-        </div>
+        ) : (
+          /* TRANSCRIPTION MODE: Single text display */
+          <>
+            <div 
+              ref={transcriptBoxRef}
+              className="bg-white/95 backdrop-blur rounded-xl p-6 min-h-[140px] max-h-[400px] overflow-y-auto transition-none scroll-smooth"
+            >
+              {livePartial ? (
+                <p className="text-gray-900 font-semibold text-3xl leading-relaxed tracking-wide break-words">
+                  {livePartial}
+                  {isListening && (
+                    <span className="inline-block w-1 h-8 ml-2 bg-blue-600 animate-pulse"></span>
+                  )}
+                </p>
+              ) : (
+                <div className="flex items-center justify-center h-full min-h-[140px]">
+                  <p className="text-gray-400 text-xl">
+                    {isListening ? 'Ready • Start speaking...' : 'Click "Listen" to start'}
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-3 text-xs text-white/80 font-medium">
+              {livePartial ? (
+                <>🔴 LIVE • Words streaming in real-time</>
+              ) : isListening ? (
+                <>Ready • Start speaking to see text appear</>
+              ) : (
+                <>Start listening to see live transcription</>
+              )}
+            </div>
+          </>
+        )}
       </div>
-
-      {/* Note: Translation mode not yet implemented with new pattern */}
 
       {/* HISTORY - Completed paragraphs scroll below */}
       {finalTranslations.length > 0 && (

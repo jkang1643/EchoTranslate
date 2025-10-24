@@ -1,20 +1,20 @@
 /**
- * Host Mode Handler - Uses OpenAI Realtime Session Pool for multi-user sessions
+ * Host Mode Handler - Uses Google Cloud Speech for transcription + OpenAI for translation
  * 
- * MIGRATION NOTES:
- * - Replaced GeminiSessionPool with OpenAIRealtimePool
- * - Uses OpenAI Realtime API for transcription
- * - Translation still handled by translationManager (using separate API calls)
- * - Maintains same session management and multi-user broadcast logic
+ * ARCHITECTURE:
+ * - Google Cloud Speech-to-Text for streaming transcription with live partials
+ * - OpenAI Chat API for translation of final transcripts
+ * - Live partial results broadcast to all listeners immediately
+ * - Final results translated and broadcast to each language group
  */
 
-import { OpenAIRealtimePool } from './openaiRealtimePool.js';
+import { GoogleSpeechStream } from './googleSpeechStream.js';
 import WebSocket from 'ws';
 import sessionStore from './sessionStore.js';
 import translationManager from './translationManager.js';
 
 export async function handleHostConnection(clientWs, sessionId) {
-  console.log(`[HostMode] ⚡ Host connecting to session ${sessionId} - Using OpenAI Realtime API`);
+  console.log(`[HostMode] ⚡ Host connecting to session ${sessionId} - Using Google Speech + OpenAI Translation`);
   
   const session = sessionStore.getSession(sessionId);
   if (!session) {
@@ -26,7 +26,7 @@ export async function handleHostConnection(clientWs, sessionId) {
     return;
   }
 
-  let sessionPool = null;
+  let speechStream = null;
   let currentSourceLang = 'en';
 
   // Handle client messages
@@ -43,38 +43,136 @@ export async function handleHostConnection(clientWs, sessionId) {
           
           console.log(`[HostMode] Session ${sessionId} initialized with source language: ${currentSourceLang}`);
           
-          // Initialize OpenAI Realtime session pool
-          if (!sessionPool) {
+          // Initialize Google Speech stream
+          if (!speechStream) {
             try {
-              // MIGRATION NOTE: Check for OpenAI API key instead of Gemini
-              if (!process.env.OPENAI_API_KEY) {
-                throw new Error('OPENAI_API_KEY not configured in environment');
-              }
+              console.log(`[HostMode] 🚀 Creating Google Speech stream for ${currentSourceLang}...`);
+              speechStream = new GoogleSpeechStream();
               
-              sessionPool = new OpenAIRealtimePool(process.env.OPENAI_API_KEY, 1); // 1 session (single host speaker)
-              await sessionPool.initialize(currentSourceLang, currentSourceLang); // Transcription mode
+              // Initialize with source language for transcription
+              await speechStream.initialize(currentSourceLang);
               
-              // Set up result callback with support for partial transcripts
-              sessionPool.onResult(async (transcriptText, sequence, isPartial = false) => {
+              // Set up error callback
+              speechStream.onError((error) => {
+                console.error('[HostMode] Speech stream error:', error);
+                // Notify host
+                if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+                  clientWs.send(JSON.stringify({
+                    type: 'warning',
+                    message: 'Transcription service restarting...',
+                    code: error.code
+                  }));
+                }
+                // Optionally notify all listeners
+                sessionStore.broadcastToListeners(sessionId, {
+                  type: 'warning',
+                  message: 'Service restarting, please wait...'
+                });
+              });
+              
+              // Translation throttling for partials
+              let lastPartialTranslations = {}; // Track last translation per language
+              let lastPartialTranslationTime = 0;
+              let pendingPartialTranslation = null;
+              const PARTIAL_TRANSLATION_THROTTLE = 800; // Max every 800ms
+              
+              // Set up result callback - handles both partials and finals
+              speechStream.onResult(async (transcriptText, isPartial) => {
                 if (isPartial) {
-                  // Live partial transcript - INSTANT, NO TRANSLATION
-                  // Translation is too slow for word-by-word live display
-                  // Broadcast source language immediately to all listeners
+                  // Live partial transcript - send original immediately to ALL listeners
                   sessionStore.broadcastToListeners(sessionId, {
                     type: 'translation',
                     originalText: transcriptText,
-                    translatedText: transcriptText, // Show source language for partials
+                    translatedText: transcriptText, // Default to source
                     sourceLang: currentSourceLang,
                     targetLang: currentSourceLang,
                     timestamp: Date.now(),
                     sequenceId: -1,
-                    isPartial: true
+                    isPartial: true,
+                    hasTranslation: false
                   });
+                  
+                  // Throttled translation for listeners with different target languages
+                  const targetLanguages = sessionStore.getSessionLanguages(sessionId);
+                  if (targetLanguages.length > 0 && transcriptText.length > 10) {
+                    const now = Date.now();
+                    const timeSinceLastTranslation = now - lastPartialTranslationTime;
+                    
+                    if (timeSinceLastTranslation >= PARTIAL_TRANSLATION_THROTTLE) {
+                      lastPartialTranslationTime = now;
+                      
+                      // Cancel pending translation
+                      if (pendingPartialTranslation) {
+                        clearTimeout(pendingPartialTranslation);
+                      }
+                      
+                      try {
+                        console.log(`[HostMode] 🔄 Translating partial to ${targetLanguages.length} language(s)`);
+                        const translations = await translationManager.translateToMultipleLanguages(
+                          transcriptText,
+                          currentSourceLang,
+                          targetLanguages,
+                          process.env.OPENAI_API_KEY
+                        );
+                        
+                        // Broadcast translated partials to each language group
+                        for (const [targetLang, translatedText] of Object.entries(translations)) {
+                          lastPartialTranslations[targetLang] = transcriptText;
+                          sessionStore.broadcastToListeners(sessionId, {
+                            type: 'translation',
+                            originalText: transcriptText,
+                            translatedText: translatedText,
+                            sourceLang: currentSourceLang,
+                            targetLang: targetLang,
+                            timestamp: Date.now(),
+                            sequenceId: -1,
+                            isPartial: true,
+                            hasTranslation: true
+                          }, targetLang);
+                        }
+                      } catch (error) {
+                        console.error('[HostMode] Partial translation error:', error);
+                      }
+                    } else {
+                      // Schedule delayed translation
+                      if (pendingPartialTranslation) {
+                        clearTimeout(pendingPartialTranslation);
+                      }
+                      
+                      pendingPartialTranslation = setTimeout(async () => {
+                        try {
+                          const translations = await translationManager.translateToMultipleLanguages(
+                            transcriptText,
+                            currentSourceLang,
+                            targetLanguages,
+                            process.env.OPENAI_API_KEY
+                          );
+                          
+                          for (const [targetLang, translatedText] of Object.entries(translations)) {
+                            lastPartialTranslations[targetLang] = transcriptText;
+                            sessionStore.broadcastToListeners(sessionId, {
+                              type: 'translation',
+                              originalText: transcriptText,
+                              translatedText: translatedText,
+                              sourceLang: currentSourceLang,
+                              targetLang: targetLang,
+                              timestamp: Date.now(),
+                              sequenceId: -1,
+                              isPartial: true,
+                              hasTranslation: true
+                            }, targetLang);
+                          }
+                        } catch (error) {
+                          console.error('[HostMode] Delayed partial translation error:', error);
+                        }
+                      }, PARTIAL_TRANSLATION_THROTTLE);
+                    }
+                  }
                   return;
                 }
                 
                 // Final transcript - translate and broadcast
-                console.log(`[HostMode] 📝 FINAL Transcript #${sequence}: "${transcriptText.substring(0, 50)}..."`);
+                console.log(`[HostMode] 📝 FINAL Transcript: "${transcriptText.substring(0, 50)}..."`);
                 
                 // Get all target languages needed
                 const targetLanguages = sessionStore.getSessionLanguages(sessionId);
@@ -104,7 +202,7 @@ export async function handleHostConnection(clientWs, sessionId) {
                       sourceLang: currentSourceLang,
                       targetLang: targetLang,
                       timestamp: Date.now(),
-                      sequenceId: sequence,
+                      sequenceId: Date.now(),
                       isPartial: false
                     }, targetLang);
                   }
@@ -113,9 +211,9 @@ export async function handleHostConnection(clientWs, sessionId) {
                 }
               });
               
-              console.log('[HostMode] ✅ OpenAI Realtime pool initialized and ready');
+              console.log('[HostMode] ✅ Google Speech stream initialized and ready');
             } catch (error) {
-              console.error('[HostMode] Failed to initialize OpenAI Realtime pool:', error);
+              console.error('[HostMode] Failed to initialize Google Speech stream:', error);
               if (clientWs.readyState === WebSocket.OPEN) {
                 clientWs.send(JSON.stringify({
                   type: 'error',
@@ -137,27 +235,20 @@ export async function handleHostConnection(clientWs, sessionId) {
           break;
 
         case 'audio':
-          // Process audio through session pool - NON-BLOCKING
-          if (sessionPool) {
-            const { duration, reason, overlapMs } = message.metadata || {};
-            console.log(`[HostMode] 🎤 Audio: ${duration?.toFixed(0) || '?'}ms, reason: ${reason || 'unknown'}, overlap: ${overlapMs || 0}ms`);
-            
-            // Non-blocking - always accepts audio
-            await sessionPool.processAudio(message.audioData);
-            
-            // Log pool stats every 10 chunks
-            const stats = sessionPool.getStats();
-            if (stats.nextSequence % 10 === 0) {
-              console.log(`[HostMode] 📊 Pool stats: ${stats.busySessions}/${stats.totalSessions} busy, ${stats.totalQueuedItems} queued, ${stats.pendingResults} pending`);
-            }
+          // Process audio through Google Speech stream
+          if (speechStream) {
+            // Stream audio to Google Speech for transcription
+            await speechStream.processAudio(message.audioData);
           } else {
-            console.warn('[HostMode] Received audio before pool initialization');
+            console.warn('[HostMode] Received audio before stream initialization');
           }
           break;
           
         case 'audio_end':
           console.log('[HostMode] Audio stream ended');
-          // Pool continues processing queued items automatically
+          if (speechStream) {
+            await speechStream.endAudio();
+          }
           break;
       }
     } catch (error) {
@@ -169,16 +260,16 @@ export async function handleHostConnection(clientWs, sessionId) {
   clientWs.on('close', () => {
     console.log('[HostMode] Host disconnected from session');
     
-    if (sessionPool) {
-      sessionPool.destroy();
-      sessionPool = null;
+    if (speechStream) {
+      speechStream.destroy();
+      speechStream = null;
     }
     
     sessionStore.closeSession(sessionId);
   });
 
   // Initialize the session as active
-  sessionStore.setHost(sessionId, clientWs, null); // No direct WebSocket needed with pool
-  console.log(`[HostMode] Session ${session.sessionCode} is now active with OpenAI Realtime`);
+  sessionStore.setHost(sessionId, clientWs, null); // No direct WebSocket needed with stream
+  console.log(`[HostMode] Session ${session.sessionCode} is now active with Google Speech`);
 }
 

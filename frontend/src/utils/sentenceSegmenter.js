@@ -123,35 +123,55 @@ export class SentenceSegmenter {
       // Flush the first N sentences (where N = total - max + 1)
       // Example: 5 sentences, max 3 → flush first 3, keep last 2
       const numToFlush = allCompleteSentences.length - this.maxSentences + 1;
-      flushedSentences = allCompleteSentences.slice(0, numToFlush);
+      const candidateFlush = allCompleteSentences.slice(0, numToFlush);
       
-      // Track what we flushed to prevent duplicates
-      this.flushedText += ' ' + flushedSentences.join(' ');
-      this.flushedText = this.flushedText.trim();
+      // DEDUPLICATE: Only flush sentences NOT already in flushedText
+      flushedSentences = candidateFlush.filter(sentence => {
+        return !this.flushedText.includes(sentence.trim());
+      });
       
-      console.log(`[Segmenter] 📦 AUTO-FLUSH: ${flushedSentences.length} sentence(s) → history`);
-      console.log(`[Segmenter] 🎯 Flushed text length now: ${this.flushedText.length} chars`);
+      if (flushedSentences.length > 0) {
+        // Track what we flushed to prevent duplicates
+        this.flushedText += ' ' + flushedSentences.join(' ');
+        this.flushedText = this.flushedText.trim();
+        
+        console.log(`[Segmenter] 📦 AUTO-FLUSH: ${flushedSentences.length} NEW sentence(s) → history`);
+        console.log(`[Segmenter] 🎯 Flushed text length now: ${this.flushedText.length} chars`);
+      } else {
+        console.log(`[Segmenter] ⏭️ SKIP: All ${candidateFlush.length} sentences already flushed`);
+        flushedSentences = []; // Clear to prevent onFlush trigger
+      }
     }
     
     // RULE 2: If cumulative text exceeds maxChars, force flush complete sentences
     else if (cumulativeText.length > this.maxChars && allCompleteSentences.length > 0) {
-      flushedSentences = allCompleteSentences;
+      // DEDUPLICATE: Only flush NEW sentences
+      flushedSentences = allCompleteSentences.filter(sentence => {
+        return !this.flushedText.includes(sentence.trim());
+      });
       
-      this.flushedText += ' ' + flushedSentences.join(' ');
-      this.flushedText = this.flushedText.trim();
-      
-      console.log(`[Segmenter] 📦 CHAR-FLUSH: ${flushedSentences.length} sentence(s) → history (exceeded ${this.maxChars} chars)`);
+      if (flushedSentences.length > 0) {
+        this.flushedText += ' ' + flushedSentences.join(' ');
+        this.flushedText = this.flushedText.trim();
+        
+        console.log(`[Segmenter] 📦 CHAR-FLUSH: ${flushedSentences.length} NEW sentence(s) → history (exceeded ${this.maxChars} chars)`);
+      }
     }
     
     // RULE 3: If too much time has passed, flush all complete sentences
     else if (now - this.lastUpdateTime > this.maxTimeMs && allCompleteSentences.length > 0) {
-      flushedSentences = allCompleteSentences;
+      // DEDUPLICATE: Only flush NEW sentences
+      flushedSentences = allCompleteSentences.filter(sentence => {
+        return !this.flushedText.includes(sentence.trim());
+      });
       
-      this.flushedText += ' ' + flushedSentences.join(' ');
-      this.flushedText = this.flushedText.trim();
-      
-      console.log(`[Segmenter] 📦 TIME-FLUSH: ${flushedSentences.length} sentence(s) → history (exceeded ${this.maxTimeMs}ms)`);
-      this.lastUpdateTime = now;
+      if (flushedSentences.length > 0) {
+        this.flushedText += ' ' + flushedSentences.join(' ');
+        this.flushedText = this.flushedText.trim();
+        
+        console.log(`[Segmenter] 📦 TIME-FLUSH: ${flushedSentences.length} NEW sentence(s) → history (exceeded ${this.maxTimeMs}ms)`);
+        this.lastUpdateTime = now;
+      }
     }
     
     // Trigger flush callback if we have sentences to flush
@@ -193,18 +213,41 @@ export class SentenceSegmenter {
       console.log(`[Segmenter] ✅ FINAL: Deduplicating (${this.flushedText.length} chars already flushed)`);
     }
     
+    // Also check for substring overlaps (Google Speech can send overlapping finals)
+    if (this.flushedText && !finalText.includes(this.flushedText)) {
+      // Check if finalText overlaps with end of flushedText
+      const overlap = this.findOverlap(this.flushedText, finalText);
+      if (overlap > 0) {
+        textToFlush = finalText.substring(overlap).trim();
+        console.log(`[Segmenter] ✂️ FINAL: Found ${overlap} char overlap, keeping delta: "${textToFlush.substring(0, 40)}..."`);
+      }
+    }
+    
     const sentences = this.detectSentences(textToFlush);
     
-    // Reset state for next segment
+    // Filter out sentences we've already seen
+    const newSentences = sentences.filter(s => {
+      const trimmed = s.trim();
+      // Only include if not already in flushedText
+      return trimmed.length > 0 && !this.flushedText.includes(trimmed);
+    });
+    
+    // Update flushedText with new content (DON'T reset it - Google sends multiple finals!)
+    if (newSentences.length > 0) {
+      this.flushedText += ' ' + newSentences.join(' ');
+      this.flushedText = this.flushedText.trim();
+    }
+    
+    // Reset live text but KEEP flushedText for deduplication
     this.liveText = '';
-    this.flushedText = '';
+    this.cumulativeText = ''; // Reset cumulative for next utterance
     this.lastUpdateTime = Date.now();
     
-    console.log(`[Segmenter] ✅ FINAL: Moving ${sentences.length} NEW sentence(s) to history`);
+    console.log(`[Segmenter] ✅ FINAL: Moving ${newSentences.length} NEW sentence(s) to history (total flushed: ${this.flushedText.length} chars)`);
     
     return {
       liveText: '',
-      flushedSentences: sentences.filter(s => s.trim().length > 0)
+      flushedSentences: newSentences
     };
   }
 
@@ -216,6 +259,25 @@ export class SentenceSegmenter {
     this.flushedText = '';
     this.cumulativeText = '';
     this.lastUpdateTime = Date.now();
+  }
+  
+  /**
+   * Soft reset - clear live state but keep deduplication memory
+   * Use this between short pauses in the same conversation
+   */
+  softReset() {
+    this.liveText = '';
+    this.cumulativeText = '';
+    this.lastUpdateTime = Date.now();
+    // Keep flushedText for deduplication
+  }
+  
+  /**
+   * Hard reset - clear everything including deduplication memory
+   * Use this when starting a completely new session
+   */
+  hardReset() {
+    this.reset();
   }
 
   /**
