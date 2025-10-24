@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { flushSync } from 'react-dom'
 import { Mic, MicOff, Volume2, VolumeX, Globe, Settings, ArrowLeft } from 'lucide-react'
 import { LanguageSelector } from './LanguageSelector'
 import TranslationDisplay from './TranslationDisplay'
@@ -67,35 +68,40 @@ function TranslationInterface({ onBackToHome }) {
   const [isConnected, setIsConnected] = useState(false)
   const [sourceLang, setSourceLang] = useState('en')
   const [targetLang, setTargetLang] = useState('es')
-  const [translations, setTranslations] = useState([])
+  
+  // CRITICAL: Separate states for live streaming vs history
+  const [livePartial, setLivePartial] = useState('') // 🔴 LIVE text appearing word-by-word
+  const [finalTranslations, setFinalTranslations] = useState([]) // 📝 Completed translations
+  
   const [showSettings, setShowSettings] = useState(false)
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [latency, setLatency] = useState(0)
+  
+  // Throttle mechanism for smooth streaming
+  const lastUpdateTimeRef = useRef(0)
+  const pendingTextRef = useRef(null)
+  const throttleTimerRef = useRef(null)
 
-  // Dynamically determine WebSocket URL based on frontend URL
-  const getWebSocketUrl = () => {
-    const hostname = window.location.hostname;
-    console.log('[TranslationInterface] Detected hostname:', hostname);
-    console.log('[TranslationInterface] Full location:', window.location.href);
-    
-    // Validate IP address format
-    const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-    
-    if (hostname !== 'localhost' && !ipv4Pattern.test(hostname)) {
-      console.error('[TranslationInterface] Invalid hostname format, using localhost');
-      return 'ws://localhost:3001/translate';
-    }
-    
-    const wsUrl = `ws://${hostname}:3001/translate`;
-    console.log('[TranslationInterface] Constructed WebSocket URL:', wsUrl);
-    return wsUrl;
-  };
+  // Memoize WebSocket URL calculation to prevent re-computation on every render
+  const finalWebSocketUrl = useMemo(() => {
+    const getWebSocketUrl = () => {
+      const hostname = window.location.hostname;
+      
+      // Validate IP address format
+      const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+      
+      if (hostname !== 'localhost' && !ipv4Pattern.test(hostname)) {
+        return 'ws://localhost:3001/translate';
+      }
+      
+      return `ws://${hostname}:3001/translate`;
+    };
 
-  // Get the WebSocket URL - ensure it has /translate path
-  const websocketUrl = import.meta.env.VITE_WS_URL || getWebSocketUrl();
-  // Force /translate path if not present
-  const finalWebSocketUrl = websocketUrl.endsWith('/translate') ? websocketUrl : websocketUrl + '/translate';
-  console.log('[TranslationInterface] Final WebSocket URL being used:', finalWebSocketUrl);
+    const websocketUrl = import.meta.env.VITE_WS_URL || getWebSocketUrl();
+    const finalUrl = websocketUrl.endsWith('/translate') ? websocketUrl : websocketUrl + '/translate';
+    console.log('[TranslationInterface] 🔌 WebSocket URL:', finalUrl);
+    return finalUrl;
+  }, []); // Empty deps - only calculate once
 
   const { 
     connect, 
@@ -109,25 +115,105 @@ function TranslationInterface({ onBackToHome }) {
     startRecording,
     stopRecording,
     isRecording,
-    audioLevel
+    audioLevel,
+    availableDevices,
+    selectedDeviceId,
+    setSelectedDeviceId
   } = useAudioCapture()
 
+  // Define message handler with useCallback to prevent re-creation
+  const handleWebSocketMessage = useCallback((message) => {
+    console.log('[TranslationInterface] 🔔 MESSAGE HANDLER CALLED:', message.type, message.isPartial ? '(PARTIAL)' : '(FINAL)')
+    
+    switch (message.type) {
+      case 'session_ready':
+        console.log('[TranslationInterface] ✅ Translation session ready')
+        break
+      case 'translation':
+        if (message.isPartial) {
+          // 🔴 LIVE PARTIAL: Throttle updates for smooth streaming
+          const text = message.originalText || message.translatedText
+          const now = Date.now()
+          
+          // Store the latest text
+          pendingTextRef.current = text
+          
+          // THROTTLE: Update max 20 times per second (50ms intervals)
+          const timeSinceLastUpdate = now - lastUpdateTimeRef.current
+          
+          if (timeSinceLastUpdate >= 50) {
+            // Immediate update with forced sync render
+            lastUpdateTimeRef.current = now
+            flushSync(() => {
+              setLivePartial(text)
+            })
+            console.log(`[TranslationInterface] ⚡ IMMEDIATE: "${text.substring(0, 30)}..." [${text.length}chars]`)
+          } else {
+            // Schedule delayed update
+            if (throttleTimerRef.current) {
+              clearTimeout(throttleTimerRef.current)
+            }
+            
+            throttleTimerRef.current = setTimeout(() => {
+              const latestText = pendingTextRef.current
+              if (latestText) {
+                lastUpdateTimeRef.current = Date.now()
+                flushSync(() => {
+                  setLivePartial(latestText)
+                })
+                console.log(`[TranslationInterface] ⏱️ THROTTLED: "${latestText.substring(0, 30)}..." [${latestText.length}chars]`)
+              }
+            }, 50)
+          }
+        } else {
+          // 📝 FINAL: Move to history and clear live partial
+          console.log(`[TranslationInterface] 📝 FINAL: "${message.translatedText.substring(0, 50)}..." - Moving to history`)
+          
+          // Add to final translations
+          setFinalTranslations(prev => [...prev, {
+            id: Date.now(),
+            original: message.originalText || '',
+            translated: message.translatedText,
+            timestamp: message.timestamp || Date.now(),
+            sequenceId: message.sequenceId
+          }])
+          
+          // Clear live partial for next segment
+          setLivePartial('')
+          setLatency(Date.now() - (message.timestamp || Date.now()))
+        }
+        break
+      case 'error':
+        console.error('[TranslationInterface] ❌ Translation error:', message.message)
+        // Show quota errors prominently
+        if (message.code === 1011 || message.message.includes('Quota') || message.message.includes('quota')) {
+          alert('⚠️ API Quota Exceeded!\n\n' + message.message + '\n\nPlease check your API limits and try again later.')
+        }
+        break
+      default:
+        console.log('[TranslationInterface] ⚠️ Unknown message type:', message.type)
+    }
+  }, []) // No dependencies - handler is stable
+  
   useEffect(() => {
+    console.log('[TranslationInterface] 🚀 Initializing WebSocket connection')
     connect()
     
     // Add message handler
     const removeHandler = addMessageHandler(handleWebSocketMessage)
     
     return () => {
+      console.log('[TranslationInterface] 🔌 Cleaning up WebSocket')
       removeHandler()
       disconnect()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [handleWebSocketMessage])
 
   useEffect(() => {
     if (connectionState === 'open') {
       setIsConnected(true)
+      console.log('[TranslationInterface] 📡 WebSocket OPEN - Initializing session')
       // Initialize translation session
       sendMessage({
         type: 'init',
@@ -136,8 +222,12 @@ function TranslationInterface({ onBackToHome }) {
       })
     } else {
       setIsConnected(false)
+      if (connectionState !== 'connecting') {
+        console.log('[TranslationInterface] ⚠️ WebSocket state:', connectionState)
+      }
     }
-  }, [connectionState, sourceLang, targetLang])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionState, sourceLang, targetLang]) // Remove sendMessage from deps to prevent re-render loop
 
   const handleStartListening = async () => {
     if (!isConnected) return
@@ -182,33 +272,7 @@ function TranslationInterface({ onBackToHome }) {
     }
   }
 
-  const handleWebSocketMessage = (message) => {
-    switch (message.type) {
-      case 'session_ready':
-        console.log('Translation session ready')
-        break
-      case 'translation':
-        setTranslations(prev => [...prev, {
-          id: Date.now(),
-          original: message.originalText,
-          translated: message.translatedText,
-          timestamp: message.timestamp
-        }])
-        setLatency(Date.now() - message.timestamp)
-        break
-      case 'error':
-        console.error('Translation error:', message.message)
-        // Show quota errors prominently
-        if (message.code === 1011 || message.message.includes('Quota') || message.message.includes('quota')) {
-          alert('⚠️ API Quota Exceeded!\n\n' + message.message + '\n\nPlease check your Gemini API limits and try again later.')
-          // Stop listening if quota exceeded
-          if (isListening) {
-            handleStopListening()
-          }
-        }
-        break
-    }
-  }
+  // handleWebSocketMessage is now defined above with useCallback
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -229,7 +293,9 @@ function TranslationInterface({ onBackToHome }) {
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center space-x-4">
-                <h2 className="text-2xl font-bold text-gray-900">Voice Translation - Solo Mode</h2>
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {sourceLang === targetLang ? 'Voice Transcription' : 'Voice Translation'} - Solo Mode
+                </h2>
             <ConnectionStatus 
               isConnected={isConnected} 
               latency={latency}
@@ -263,6 +329,34 @@ function TranslationInterface({ onBackToHome }) {
         {showSettings && (
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <h3 className="font-semibold text-gray-900 mb-3">Settings</h3>
+            
+            {/* Microphone Selector */}
+            {availableDevices.length > 0 && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  🎤 Microphone Device
+                </label>
+                <select
+                  value={selectedDeviceId || ''}
+                  onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={isListening}
+                >
+                  <option value="">Auto-select (Recommended)</option>
+                  {availableDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `Microphone ${device.deviceId.substring(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+                {isListening && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Stop listening to change microphone
+                  </p>
+                )}
+              </div>
+            )}
+            
             <div className="flex items-center space-x-4">
               <label className="flex items-center space-x-2">
                 <input
@@ -324,10 +418,13 @@ function TranslationInterface({ onBackToHome }) {
         </div>
 
         {/* Translation Display */}
-        <TranslationDisplay 
-          translations={translations}
+        <TranslationDisplay
+          finalTranslations={finalTranslations}
+          livePartial={livePartial}
           audioEnabled={audioEnabled}
           isListening={isListening}
+          sourceLang={sourceLang}
+          targetLang={targetLang}
         />
           </div>
         </div>

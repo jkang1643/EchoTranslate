@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import QRCode from 'qrcode';
 import { useAudioCapture } from '../hooks/useAudioCapture';
 import { Header } from './Header';
@@ -105,6 +106,7 @@ export function HostPage({ onBackToHome }) {
   const [sourceLang, setSourceLang] = useState('en');
   const [connectionState, setConnectionState] = useState('disconnected');
   const [transcript, setTranscript] = useState([]);
+  const [currentTranscript, setCurrentTranscript] = useState(''); // Live partial transcription
   const [isStreaming, setIsStreaming] = useState(false);
   const [listenerCount, setListenerCount] = useState(0);
   const [languageStats, setLanguageStats] = useState({});
@@ -112,6 +114,11 @@ export function HostPage({ onBackToHome }) {
 
   const wsRef = useRef(null);
   const { startRecording, stopRecording, isRecording, audioLevel } = useAudioCapture();
+  
+  // Throttling refs for smooth partial updates (20fps max)
+  const lastUpdateTimeRef = useRef(0);
+  const pendingTextRef = useRef(null);
+  const throttleTimerRef = useRef(null);
 
   // Create session on mount
   useEffect(() => {
@@ -202,6 +209,50 @@ export function HostPage({ onBackToHome }) {
               text: message.text,
               timestamp: message.timestamp
             }].slice(-10)); // Keep last 10 transcripts
+            break;
+          
+          case 'translation':
+            // ✨ REAL-TIME STREAMING: Throttled word-by-word display
+            if (message.isPartial) {
+              const text = message.originalText || message.translatedText;
+              const now = Date.now();
+              
+              // Store the latest text
+              pendingTextRef.current = text;
+              
+              // THROTTLE: Update max 20 times per second (50ms intervals)
+              const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
+              
+              if (timeSinceLastUpdate >= 50) {
+                // Immediate update with forced sync render
+                lastUpdateTimeRef.current = now;
+                flushSync(() => {
+                  setCurrentTranscript(text);
+                });
+              } else {
+                // Schedule delayed update
+                if (throttleTimerRef.current) {
+                  clearTimeout(throttleTimerRef.current);
+                }
+                
+                throttleTimerRef.current = setTimeout(() => {
+                  const latestText = pendingTextRef.current;
+                  if (latestText) {
+                    lastUpdateTimeRef.current = Date.now();
+                    flushSync(() => {
+                      setCurrentTranscript(latestText);
+                    });
+                  }
+                }, 50);
+              }
+            } else {
+              // Final transcript - add to history and clear current
+              setTranscript(prev => [...prev, {
+                text: message.originalText || message.translatedText,
+                timestamp: message.timestamp || Date.now()
+              }].slice(-10)); // Keep last 10
+              setCurrentTranscript('');
+            }
             break;
           
           case 'session_stats':
@@ -380,15 +431,70 @@ export function HostPage({ onBackToHome }) {
           </div>
         </div>
 
-        {/* Live Transcript */}
+        {/* LIVE TRANSCRIPTION AREA - FIXED POSITION, INLINE UPDATES */}
+        {(currentTranscript || isStreaming) && (
+          <div className="bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 rounded-2xl p-6 shadow-2xl">
+            <div className="flex items-center space-x-3 mb-4">
+              {isStreaming && (
+                <div className="flex space-x-1">
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce"></div>
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.15s'}}></div>
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.3s'}}></div>
+                </div>
+              )}
+              <span className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                {isStreaming ? (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+                    </span>
+                    LIVE TRANSCRIPTION
+                  </>
+                ) : (
+                  'READY'
+                )}
+              </span>
+            </div>
+            
+            <div className="bg-white/95 backdrop-blur rounded-xl p-6 min-h-[140px] transition-none">
+              {currentTranscript ? (
+                <p className="text-gray-900 font-semibold text-3xl leading-relaxed tracking-wide">
+                  {currentTranscript}
+                  {isStreaming && (
+                    <span className="inline-block w-1 h-8 ml-2 bg-blue-600 animate-pulse"></span>
+                  )}
+                </p>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-400 text-xl">
+                    {isStreaming ? 'Listening for speech...' : 'Click "Start Broadcasting" to begin'}
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-3 text-xs text-white/80 font-medium">
+              {isStreaming ? 'Words update in real-time • Broadcasting to all listeners' : 'Ready to broadcast'}
+            </div>
+          </div>
+        )}
+
+        {/* History - Completed transcripts */}
         {transcript.length > 0 && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h3 className="text-xl font-bold mb-4 text-gray-800">Live Transcript</h3>
+          <div className="bg-gray-50 rounded-xl p-5 border-2 border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+              <span className="text-blue-600">📝</span>
+              History
+              <span className="text-xs text-gray-500 font-normal">
+                (last 10 segments)
+              </span>
+            </h3>
             <div className="space-y-3">
-              {transcript.map((item, index) => (
-                <div key={index} className="p-3 bg-gray-50 rounded border-l-4 border-indigo-500">
-                  <p className="text-gray-800">{item.text}</p>
-                  <p className="text-xs text-gray-500 mt-1">
+              {transcript.slice().reverse().map((item, index) => (
+                <div key={index} className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+                  <p className="text-gray-800 text-base leading-relaxed">{item.text}</p>
+                  <p className="text-xs text-gray-400 mt-2">
                     {new Date(item.timestamp).toLocaleTimeString()}
                   </p>
                 </div>

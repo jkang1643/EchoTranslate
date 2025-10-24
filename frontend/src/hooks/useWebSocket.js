@@ -6,24 +6,40 @@ export function useWebSocket(url) {
   const messageHandlersRef = useRef(new Set())
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    // Close existing connection if any
+    if (wsRef.current) {
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        console.log('[WebSocket] Already connected')
+        return
+      }
+      wsRef.current.close()
+    }
 
+    console.log(`[WebSocket] Connecting to: ${url}`)
+    
     try {
       wsRef.current = new WebSocket(url)
       
       wsRef.current.onopen = () => {
         setConnectionState('open')
-        console.log('WebSocket connected')
+        console.log('[WebSocket] ✅ Connected successfully!')
       }
       
-      wsRef.current.onclose = () => {
+      wsRef.current.onclose = (event) => {
         setConnectionState('closed')
-        console.log('WebSocket disconnected')
+        console.log(`[WebSocket] ❌ Disconnected (code: ${event.code}, reason: ${event.reason})`)
+        // Auto-reconnect after 2 seconds
+        setTimeout(() => {
+          if (wsRef.current?.readyState !== WebSocket.OPEN) {
+            console.log('[WebSocket] Attempting to reconnect...')
+            connect()
+          }
+        }, 2000)
       }
       
       wsRef.current.onerror = (error) => {
         setConnectionState('error')
-        console.error('WebSocket error:', error)
+        console.error('[WebSocket] ⚠️ Error:', error)
       }
       
       wsRef.current.onmessage = (event) => {
@@ -31,6 +47,10 @@ export function useWebSocket(url) {
         if (typeof event.data === 'string') {
           try {
             const message = JSON.parse(event.data)
+            // Log partial updates for debugging
+            if (message.type === 'translation' && message.isPartial) {
+              console.log(`[WebSocket] 📥 RECEIVED PARTIAL: "${(message.originalText || message.translatedText).substring(0, 30)}..."`)
+            }
             messageHandlersRef.current.forEach(handler => {
               try {
                 handler(message)
@@ -49,7 +69,7 @@ export function useWebSocket(url) {
       }
     } catch (error) {
       setConnectionState('error')
-      console.error('Failed to create WebSocket:', error)
+      console.error('[WebSocket] Failed to create WebSocket:', error)
     }
   }, [url])
 

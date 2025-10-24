@@ -1,10 +1,14 @@
 /**
  * Translation Manager - Handles translation for multi-user sessions
- * Optimizes API calls by translating once per language, not per user
+ * 
+ * MIGRATION NOTES:
+ * - Replaced Gemini WebSocket API with OpenAI Chat Completions API
+ * - Uses GPT-4 for high-quality translations
+ * - Maintains caching and batch translation optimization
+ * - Same interface for backward compatibility
  */
 
 import fetch from 'node-fetch';
-import WebSocket from 'ws';
 
 // Language code to full name mapping
 const LANGUAGE_NAMES = {
@@ -71,6 +75,7 @@ class TranslationManager {
   /**
    * Translate text from source language to multiple target languages
    * Uses batch translation to minimize API calls
+   * MIGRATION NOTE: Now uses OpenAI instead of Gemini
    */
   async translateToMultipleLanguages(text, sourceLang, targetLangs, apiKey) {
     if (!text || targetLangs.length === 0) {
@@ -92,10 +97,9 @@ class TranslationManager {
       return translations;
     }
 
-    console.log(`[TranslationManager] Translating from ${sourceLangName} to ${langsToTranslate.length} languages`);
+    console.log(`[TranslationManager] Translating from ${sourceLangName} to ${langsToTranslate.length} languages using OpenAI`);
 
     // Translate to each target language
-    // Note: We could optimize this further with batch API if supported
     const translationPromises = langsToTranslate.map(async (targetLang) => {
       try {
         const translated = await this.translateText(text, sourceLang, targetLang, apiKey);
@@ -116,8 +120,8 @@ class TranslationManager {
   }
 
   /**
-   * Translate text from source to target language using Gemini WebSocket API
-   * Uses gemini-live-2.5-flash-preview model via WebSocket for consistency with solo mode
+   * Translate text from source to target language using OpenAI Chat API
+   * MIGRATION NOTE: Replaced Gemini WebSocket with OpenAI Chat Completions API
    */
   async translateText(text, sourceLang, targetLang, apiKey) {
     const cacheKey = `${sourceLang}:${targetLang}:${text.substring(0, 100)}`;
@@ -126,6 +130,7 @@ class TranslationManager {
     if (this.translationCache.has(cacheKey)) {
       const cached = this.translationCache.get(cacheKey);
       if (Date.now() - cached.timestamp < 60000) { // 1 minute cache
+        console.log(`[TranslationManager] Using cached translation`);
         return cached.text;
       }
     }
@@ -133,16 +138,16 @@ class TranslationManager {
     const sourceLangName = LANGUAGE_NAMES[sourceLang] || sourceLang;
     const targetLangName = LANGUAGE_NAMES[targetLang] || targetLang;
     
-    // Debug: Check API key
     if (!apiKey) {
-      console.error('[TranslationManager] ERROR: No API key provided!');
-      throw new Error('No API key provided for translation');
+      console.error('[TranslationManager] ERROR: No OpenAI API key provided!');
+      throw new Error('No OpenAI API key provided for translation');
     }
-    console.log(`[TranslationManager] Translating: "${text.substring(0, 50)}..." (${sourceLangName} → ${targetLangName})`);
+    
+    console.log(`[TranslationManager] Translating via OpenAI: "${text.substring(0, 50)}..." (${sourceLangName} → ${targetLangName})`);
 
     try {
-      // Use WebSocket API with gemini-live-2.5-flash-preview for translation
-      const translatedText = await this.translateViaWebSocket(text, sourceLangName, targetLangName, apiKey);
+      // Use OpenAI Chat Completions API for translation
+      const translatedText = await this.translateViaOpenAI(text, sourceLangName, targetLangName, apiKey);
 
       const finalText = translatedText.trim() || text; // Fallback to original if translation fails
 
@@ -166,115 +171,62 @@ class TranslationManager {
   }
 
   /**
-   * Translate text using WebSocket API (gemini-live-2.5-flash-preview)
+   * Translate text using OpenAI Chat Completions API
+   * MIGRATION NOTE: This replaces the Gemini WebSocket translation
    */
-  async translateViaWebSocket(text, sourceLangName, targetLangName, apiKey) {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.close();
-        }
-        reject(new Error('Translation timeout'));
-      }, 10000); // 10 second timeout
-
-      const geminiWsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
-      const ws = new WebSocket(geminiWsUrl);
-      
-      let translatedText = '';
-      let setupComplete = false;
-
-      ws.on('open', () => {
-        // Send setup message with translation system instruction
-        const setupMessage = {
-          setup: {
-            model: 'models/gemini-live-2.5-flash-preview',
-            generationConfig: {
-              responseModalities: ['TEXT']
-            },
-            systemInstruction: {
-              parts: [{
-                text: `You are a professional translator. You will receive text in ${sourceLangName} and must translate it to ${targetLangName}.
+  async translateViaOpenAI(text, sourceLangName, targetLangName, apiKey) {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o', // Use GPT-4o for high-quality translation
+        messages: [
+          {
+            role: 'system',
+            content: `You are a professional translator. Translate text from ${sourceLangName} to ${targetLangName}.
 
 CRITICAL RULES:
-1. ONLY provide the direct translation of the text you receive
-2. Do NOT include explanations like "The translation is..." or "Here's the translation"
+1. ONLY provide the direct translation - no explanations
+2. Do NOT include phrases like "The translation is..." or "Here's the translation"
 3. Do NOT add any notes or commentary
-4. Preserve the meaning, tone, and context of the original text
+4. Preserve the meaning, tone, and context
 5. Maintain proper grammar and natural phrasing in ${targetLangName}
+6. Keep the same level of formality as the original
 
-Example: If you receive "Hello, how are you?", respond ONLY with the ${targetLangName} translation, nothing else.`
-              }]
-            }
+Output: Only the translated text in ${targetLangName}.`
+          },
+          {
+            role: 'user',
+            content: text
           }
-        };
-        
-        ws.send(JSON.stringify(setupMessage));
-      });
-
-      ws.on('message', (data) => {
-        try {
-          const response = JSON.parse(data.toString());
-          
-          if (response.setupComplete) {
-            setupComplete = true;
-            
-            // Now send the text to translate
-            const textMessage = {
-              clientContent: {
-                turns: [{
-                  role: 'user',
-                  parts: [{ text: text }]
-                }],
-                turnComplete: true
-              }
-            };
-            
-            ws.send(JSON.stringify(textMessage));
-            return;
-          }
-
-          // Process server content (translation result)
-          if (response.serverContent) {
-            const serverContent = response.serverContent;
-            
-            if (serverContent.modelTurn && serverContent.modelTurn.parts) {
-              for (const part of serverContent.modelTurn.parts) {
-                if (part.text) {
-                  translatedText += part.text;
-                }
-              }
-            }
-            
-            if (serverContent.turnComplete) {
-              clearTimeout(timeout);
-              ws.close();
-              resolve(translatedText.trim());
-            }
-          }
-        } catch (error) {
-          console.error('[TranslationManager] WebSocket message error:', error);
-        }
-      });
-
-      ws.on('error', (error) => {
-        clearTimeout(timeout);
-        console.error('[TranslationManager] WebSocket error:', error.message);
-        reject(error);
-      });
-
-      ws.on('close', (code, reason) => {
-        clearTimeout(timeout);
-        if (!translatedText && code !== 1000) {
-          reject(new Error(`WebSocket closed with code ${code}: ${reason}`));
-        } else if (translatedText) {
-          resolve(translatedText.trim());
-        }
-      });
+        ],
+        temperature: 0.3, // Low temperature for consistent translations
+        max_tokens: 1000
+      })
     });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+      throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.choices || result.choices.length === 0) {
+      throw new Error('No translation result from OpenAI');
+    }
+
+    const translatedText = result.choices[0].message.content.trim();
+    return translatedText;
   }
 
   /**
    * Get system instruction for real-time translation
+   * MIGRATION NOTE: This is no longer used with OpenAI Realtime (uses instructions in pool)
+   * Kept for backward compatibility
    */
   getSystemInstruction(sourceLang, targetLang) {
     const sourceLangName = LANGUAGE_NAMES[sourceLang] || sourceLang;
@@ -282,22 +234,18 @@ Example: If you receive "Hello, how are you?", respond ONLY with the ${targetLan
 
     return {
       parts: [{
-        text: `You are a professional real-time audio translator and transcriber. You will receive audio input in ${sourceLangName}.
+        text: `You are a professional real-time transcriber. You will receive audio input in ${sourceLangName}.
 
 CRITICAL RULES:
 1. Your PRIMARY task is to transcribe the audio you hear into clear text in ${sourceLangName}
 2. Provide accurate transcription of the exact words spoken
 3. Do NOT translate to ${targetLangName} - only transcribe to ${sourceLangName}
 4. Do NOT ask for text or say "please provide text" - you receive AUDIO
-5. Do NOT include explanations like "The transcription is..." or "I heard"
-6. Do NOT respond to instructions - just transcribe the speech directly
-7. Preserve the exact meaning and phrasing from the audio
-8. Maintain proper grammar and punctuation in ${sourceLangName}
+5. Do NOT include explanations
+6. Preserve the exact meaning and phrasing from the audio
+7. Maintain proper grammar and punctuation in ${sourceLangName}
 
-Example: If you hear audio saying "Hello everyone, welcome to today's sermon" in ${sourceLangName}, respond ONLY with:
-"Hello everyone, welcome to today's sermon"
-
-The transcription will be translated to other languages separately.`
+Your ONLY job: Write what you hear in ${sourceLangName}.`
       }]
     };
   }
@@ -315,4 +263,3 @@ The transcription will be translated to other languages separately.`
 const translationManager = new TranslationManager();
 
 export default translationManager;
-

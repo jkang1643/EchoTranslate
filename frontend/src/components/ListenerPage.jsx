@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Header } from './Header';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LanguageSelector } from './LanguageSelector';
@@ -103,12 +104,18 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
   const [targetLang, setTargetLang] = useState('es');
   const [connectionState, setConnectionState] = useState('disconnected');
   const [translations, setTranslations] = useState([]);
+  const [currentTranslation, setCurrentTranslation] = useState(''); // Live partial translation
   const [sessionInfo, setSessionInfo] = useState(null);
   const [error, setError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
 
   const wsRef = useRef(null);
   const translationsEndRef = useRef(null);
+  
+  // Throttling refs for smooth partial updates (20fps max)
+  const lastUpdateTimeRef = useRef(0);
+  const pendingTextRef = useRef(null);
+  const throttleTimerRef = useRef(null);
 
   // Auto-scroll to latest translation
   useEffect(() => {
@@ -194,12 +201,48 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
             break;
           
           case 'translation':
-            // Add translation to display
-            setTranslations(prev => [...prev, {
-              original: message.originalText,
-              translated: message.translatedText,
-              timestamp: message.timestamp
-            }].slice(-50)); // Keep last 50 translations
+            // ✨ REAL-TIME STREAMING: Throttled word-by-word display
+            if (message.isPartial) {
+              const text = message.translatedText || message.originalText;
+              const now = Date.now();
+              
+              // Store the latest text
+              pendingTextRef.current = text;
+              
+              // THROTTLE: Update max 20 times per second (50ms intervals)
+              const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
+              
+              if (timeSinceLastUpdate >= 50) {
+                // Immediate update with forced sync render
+                lastUpdateTimeRef.current = now;
+                flushSync(() => {
+                  setCurrentTranslation(text);
+                });
+              } else {
+                // Schedule delayed update
+                if (throttleTimerRef.current) {
+                  clearTimeout(throttleTimerRef.current);
+                }
+                
+                throttleTimerRef.current = setTimeout(() => {
+                  const latestText = pendingTextRef.current;
+                  if (latestText) {
+                    lastUpdateTimeRef.current = Date.now();
+                    flushSync(() => {
+                      setCurrentTranslation(latestText);
+                    });
+                  }
+                }, 50);
+              }
+            } else {
+              // Final translation - add to history and clear current
+              setTranslations(prev => [...prev, {
+                original: message.originalText,
+                translated: message.translatedText,
+                timestamp: message.timestamp
+              }].slice(-50)); // Keep last 50 translations
+              setCurrentTranslation('');
+            }
             break;
           
           case 'session_ended':
@@ -229,8 +272,9 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
         targetLang: newLang
       }));
       
-      // Clear old translations when changing language
+      // Clear old translations and current text when changing language
       setTranslations([]);
+      setCurrentTranslation('');
     }
   };
 
@@ -241,6 +285,7 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
     setIsJoined(false);
     setSessionCode('');
     setTranslations([]);
+    setCurrentTranslation('');
     setConnectionState('disconnected');
   };
 
@@ -364,14 +409,72 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
           </div>
         )}
 
-        {/* Translation Display */}
+        {/* LIVE STREAMING TRANSLATION BOX - Shows text as it arrives word-by-word */}
+        <div className="bg-gradient-to-br from-green-500 via-emerald-500 to-teal-600 rounded-2xl p-6 shadow-2xl mb-6">
+          <div className="flex items-center space-x-3 mb-4">
+            {connectionState === 'open' && (
+              <div className="flex space-x-1">
+                <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce"></div>
+                <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.15s'}}></div>
+                <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.3s'}}></div>
+              </div>
+            )}
+            <span className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              {connectionState === 'open' ? (
+                <>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+                  </span>
+                  LIVE TRANSLATION
+                </>
+              ) : (
+                'CONNECTING...'
+              )}
+            </span>
+          </div>
+          
+          <div className="bg-white/95 backdrop-blur rounded-xl p-6 min-h-[140px] max-h-[400px] overflow-y-auto transition-none scroll-smooth">
+            {currentTranslation ? (
+              <p className="text-gray-900 font-semibold text-3xl leading-relaxed tracking-wide break-words">
+                {currentTranslation}
+                {connectionState === 'open' && (
+                  <span className="inline-block w-1 h-8 ml-2 bg-green-600 animate-pulse"></span>
+                )}
+              </p>
+            ) : (
+              <div className="flex items-center justify-center h-full min-h-[140px]">
+                <p className="text-gray-400 text-xl">
+                  {connectionState === 'open' ? 'Listening for host...' : 'Connecting to session...'}
+                </p>
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-3 text-xs text-white/80 font-medium">
+            {currentTranslation ? 
+              'Words update in real-time • Translation synchronized with host' : 
+              'Waiting for host to speak'
+            }
+          </div>
+        </div>
+
+        {/* Translation History */}
         <div className="bg-white rounded-lg shadow-lg p-6">
-          <h3 className="text-xl font-bold mb-4 text-gray-800">Live Translation</h3>
+          <h3 className="text-xl font-bold mb-4 text-gray-800 flex items-center gap-2">
+            <span className="text-green-600">📝</span>
+            History
+            {translations.length > 0 && (
+              <span className="text-sm text-gray-500 font-normal">
+                ({translations.length} {translations.length === 1 ? 'segment' : 'segments'})
+              </span>
+            )}
+          </h3>
           
           {translations.length === 0 ? (
             <div className="text-center py-12 text-gray-500">
-              <p className="text-lg">Waiting for the host to start speaking...</p>
-              <p className="text-sm mt-2">Translations will appear here in real-time</p>
+              <p className="text-lg">No completed translations yet</p>
+              <p className="text-sm mt-2">Translations will appear here after each phrase is complete</p>
             </div>
           ) : (
             <div className="space-y-4 max-h-[600px] overflow-y-auto">
@@ -380,12 +483,14 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
                   <p className="text-lg text-gray-800 font-medium">{item.translated}</p>
                   
                   {/* Optional: Show original text in collapsed view */}
-                  <details className="mt-2">
-                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
-                      View original
-                    </summary>
-                    <p className="text-sm text-gray-600 mt-1 italic">{item.original}</p>
-                  </details>
+                  {item.original && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                        View original
+                      </summary>
+                      <p className="text-sm text-gray-600 mt-1 italic">{item.original}</p>
+                    </details>
+                  )}
                   
                   <p className="text-xs text-gray-500 mt-2">
                     {new Date(item.timestamp).toLocaleTimeString()}

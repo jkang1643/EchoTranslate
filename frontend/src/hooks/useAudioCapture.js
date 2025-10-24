@@ -3,6 +3,10 @@ import { useState, useRef, useCallback } from 'react'
 export function useAudioCapture() {
   const [isRecording, setIsRecording] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [availableDevices, setAvailableDevices] = useState([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null)
+  const [currentDeviceLabel, setCurrentDeviceLabel] = useState('')
+  const [deviceWarning, setDeviceWarning] = useState('')
   
   const mediaRecorderRef = useRef(null)
   const audioContextRef = useRef(null)
@@ -13,20 +17,63 @@ export function useAudioCapture() {
 
   const startRecording = useCallback(async (onAudioChunk, streaming = false) => {
     try {
+      // First, enumerate devices to see what's available
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioInputs = devices.filter(device => device.kind === 'audioinput')
+      
+      setAvailableDevices(audioInputs)
+      
+      console.log('🎤 Available audio input devices:')
+      audioInputs.forEach((device, index) => {
+        console.log(`  ${index}: ${device.label || 'Unknown Device'} (${device.deviceId})`)
+      })
+      
+      // Use selected device, or find the actual microphone (not system audio or loopback)
+      let deviceId = selectedDeviceId
+      
+      if (!deviceId) {
+        // Auto-select: Prioritize devices with "microphone" or "mic" in the label
+        // Avoid "Stereo Mix", "Wave Out", "System Audio", etc.
+        const micDevice = audioInputs.find(device => {
+          const label = device.label.toLowerCase()
+          return (label.includes('microphone') || label.includes('mic')) &&
+                 !label.includes('stereo mix') &&
+                 !label.includes('wave out') &&
+                 !label.includes('system audio') &&
+                 !label.includes('loopback')
+        }) || audioInputs[0]
+        
+        deviceId = micDevice?.deviceId
+        console.log(`🎤 Auto-selected device: ${micDevice?.label || 'Default'}`)
+      } else {
+        const device = audioInputs.find(d => d.deviceId === deviceId)
+        console.log(`🎤 Using manually selected device: ${device?.label || 'Unknown'}`)
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
-          sampleRate: 16000,
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          sampleRate: 24000,  // Higher quality for better transcription
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+          noiseSuppression: false,  // DISABLED - was cutting out speech
+          autoGainControl: false,   // DISABLED - causing volume issues
+          advanced: [
+            { echoCancellation: { ideal: true } }
+          ]
         } 
       })
       streamRef.current = stream
+      
+      // Log the actual track settings
+      const audioTrack = stream.getAudioTracks()[0]
+      console.log('🎤 Audio track settings:', audioTrack.getSettings())
+      console.log('🎤 Audio track label:', audioTrack.label)
 
       // Set up audio context for PCM capture and level monitoring
+      // Use 24kHz for better quality transcription
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000
+        sampleRate: 24000
       })
       const source = audioContextRef.current.createMediaStreamSource(stream)
       analyserRef.current = audioContextRef.current.createAnalyser()
@@ -48,30 +95,75 @@ export function useAudioCapture() {
       monitorLevel()
 
       if (streaming) {
-        // STREAMING MODE: Capture PCM audio using AudioWorklet or ScriptProcessor
-        // Try using ScriptProcessor (deprecated but widely supported)
-        const bufferSize = 4096
-        const processor = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1)
-        audioProcessorRef.current = processor
-        
-        processor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0)
+        // STREAMING MODE: Use AudioWorklet (runs on separate thread) for smooth performance
+        try {
+          // Load the AudioWorklet module
+          await audioContextRef.current.audioWorklet.addModule('/audio-stream-processor.js')
           
-          // Convert Float32Array to Int16Array (PCM format)
-          const pcmData = new Int16Array(inputData.length)
-          for (let i = 0; i < inputData.length; i++) {
-            // Convert from [-1, 1] to [-32768, 32767]
-            const s = Math.max(-1, Math.min(1, inputData[i]))
-            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+          // Create AudioWorklet node
+          const workletNode = new AudioWorkletNode(
+            audioContextRef.current,
+            'stream-processor'
+          )
+          audioProcessorRef.current = workletNode
+          
+          // Listen for processed audio from worklet (runs on separate thread!)
+          workletNode.port.onmessage = (event) => {
+            if (event.data.type === 'audio') {
+              // Convert Int16Array to base64
+              const pcmData = event.data.data
+              const base64 = btoa(
+                String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer))
+              )
+              onAudioChunk(base64)
+            }
           }
           
-          // Convert to base64
-          const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)))
-          onAudioChunk(base64)
+          // Connect audio graph
+          source.connect(workletNode)
+          
+          // Create silent output to satisfy browser
+          const silentGain = audioContextRef.current.createGain()
+          silentGain.gain.value = 0
+          workletNode.connect(silentGain)
+          silentGain.connect(audioContextRef.current.destination)
+          
+          console.log('🎤 ✅ AudioWorklet initialized (audio processing OFF main thread)')
+          
+        } catch (error) {
+          console.error('❌ AudioWorklet failed, falling back to ScriptProcessor:', error)
+          
+          // FALLBACK: Use deprecated ScriptProcessor if AudioWorklet not supported
+          const bufferSize = 4096
+          const processor = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1)
+          audioProcessorRef.current = processor
+          
+          processor.onaudioprocess = (e) => {
+            const inputData = e.inputBuffer.getChannelData(0)
+            
+            // Convert Float32Array to Int16Array (PCM format)
+            const pcmData = new Int16Array(inputData.length)
+            for (let i = 0; i < inputData.length; i++) {
+              // Convert from [-1, 1] to [-32768, 32767]
+              const s = Math.max(-1, Math.min(1, inputData[i]))
+              pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+            }
+            
+            // Convert to base64
+            const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)))
+            onAudioChunk(base64)
+          }
+          
+          // Create a silent gain node to satisfy browser requirements
+          const silentGain = audioContextRef.current.createGain()
+          silentGain.gain.value = 0 // Mute completely
+          
+          source.connect(processor)
+          processor.connect(silentGain)
+          silentGain.connect(audioContextRef.current.destination)
+          
+          console.warn('⚠️ Using deprecated ScriptProcessor (may block UI rendering)')
         }
-        
-        source.connect(processor)
-        processor.connect(audioContextRef.current.destination)
       } else {
         // NON-STREAMING MODE: Use MediaRecorder for WebM (will need conversion on backend)
         mediaRecorderRef.current = new MediaRecorder(stream, {
@@ -107,7 +199,7 @@ export function useAudioCapture() {
       console.error('Failed to start recording:', error)
       throw error
     }
-  }, [])
+  }, [selectedDeviceId])
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
@@ -147,6 +239,9 @@ export function useAudioCapture() {
     startRecording,
     stopRecording,
     isRecording,
-    audioLevel
+    audioLevel,
+    availableDevices,
+    selectedDeviceId,
+    setSelectedDeviceId
   }
 }
