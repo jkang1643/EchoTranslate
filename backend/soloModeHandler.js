@@ -183,6 +183,14 @@ export async function handleSoloMode(clientWs) {
           console.log('[SoloMode] Audio stream ended');
           // Pool continues processing queued items automatically
           break;
+        
+        case 'force_commit':
+          // Frontend requests to force-commit current turn (simulated pause)
+          console.log('[SoloMode] 🔄 Force commit requested by frontend');
+          if (sessionPool) {
+            await sessionPool.forceCommit(); // Now async with delay
+          }
+          break;
           
         default:
           console.log(`[SoloMode] Unknown message type: ${message.type}`);

@@ -217,7 +217,7 @@ NOT: Answering the question`;
                 type: 'server_vad',
                 threshold: 0.5,
                 prefix_padding_ms: 300,
-                silence_duration_ms: 1500  // 1.5 seconds of silence before finalizing (was 500ms)
+                silence_duration_ms: 1000  // 1 second of silence before finalizing
               },
               temperature: 0.6,
               max_response_output_tokens: 4096
@@ -404,6 +404,53 @@ NOT: Answering the question`;
       this.sequenceCounter++;
     } catch (error) {
       console.error(`[OpenAIPool] Error appending audio to session ${session.id}:`, error);
+    }
+  }
+
+  /**
+   * Force commit the current audio buffer (simulates a pause)
+   * This tells OpenAI to finalize the current turn and start fresh
+   */
+  async forceCommit() {
+    if (this.sessions.length === 0) {
+      console.warn('[OpenAIPool] No sessions available for commit');
+      return;
+    }
+
+    // Commit on all sessions to ensure clean state
+    for (const session of this.sessions) {
+      if (session && session.setupComplete && session.ws.readyState === 1) {
+        console.log(`[OpenAIPool] 🔄 Starting force-commit for session ${session.id} (simulated pause)`);
+        
+        // Step 1: Commit any pending audio
+        session.ws.send(JSON.stringify({
+          type: 'input_audio_buffer.commit'
+        }));
+        
+        // Step 2: Force create a response (this finalizes the turn immediately)
+        session.ws.send(JSON.stringify({
+          type: 'response.create',
+          response: {
+            modalities: ['text'],
+            instructions: 'Transcribe next audio input'
+          }
+        }));
+        
+        // Step 3: Clear the audio buffer for fresh start
+        session.ws.send(JSON.stringify({
+          type: 'input_audio_buffer.clear'
+        }));
+        
+        // Clear transcript buffer for fresh start
+        session.transcriptBuffer = '';
+        
+        console.log(`[OpenAIPool] ✅ Force-committed session ${session.id} - waiting 250ms for model to reset`);
+        
+        // Step 4: Artificial delay to simulate silence gap (prevents OpenAI from merging chunks)
+        await new Promise(resolve => setTimeout(resolve, 250));
+        
+        console.log(`[OpenAIPool] 🎤 Session ${session.id} ready for fresh input`);
+      }
     }
   }
 

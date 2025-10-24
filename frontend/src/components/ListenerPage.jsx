@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom';
 import { Header } from './Header';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LanguageSelector } from './LanguageSelector';
+import { SentenceSegmenter } from '../utils/sentenceSegmenter';
 
 // Dynamically determine backend URL based on frontend URL
 // If accessing via network IP, use the same IP for backend
@@ -116,6 +117,26 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
   const lastUpdateTimeRef = useRef(0);
   const pendingTextRef = useRef(null);
   const throttleTimerRef = useRef(null);
+  
+  // Sentence segmenter for smart text management
+  const segmenterRef = useRef(null);
+  if (!segmenterRef.current) {
+    segmenterRef.current = new SentenceSegmenter({
+      maxSentences: 3,
+      maxChars: 500,
+      maxTimeMs: 15000,
+      onFlush: (flushedSentences) => {
+        const joinedText = flushedSentences.join(' ').trim();
+        if (joinedText) {
+          setTranslations(prev => [...prev, {
+            original: '',
+            translated: joinedText,
+            timestamp: Date.now()
+          }].slice(-50));
+        }
+      }
+    });
+  }
 
   // Auto-scroll to latest translation
   useEffect(() => {
@@ -201,13 +222,16 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
             break;
           
           case 'translation':
-            // ✨ REAL-TIME STREAMING: Throttled word-by-word display
+            // ✨ REAL-TIME STREAMING: Sentence segmented + throttled display
             if (message.isPartial) {
-              const text = message.translatedText || message.originalText;
+              const rawText = message.translatedText || message.originalText;
               const now = Date.now();
               
-              // Store the latest text
-              pendingTextRef.current = text;
+              // Process through segmenter (auto-flushes complete sentences)
+              const { liveText } = segmenterRef.current.processPartial(rawText);
+              
+              // Store the segmented text
+              pendingTextRef.current = liveText;
               
               // THROTTLE: Update max 20 times per second (50ms intervals)
               const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
@@ -216,7 +240,7 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
                 // Immediate update with forced sync render
                 lastUpdateTimeRef.current = now;
                 flushSync(() => {
-                  setCurrentTranslation(text);
+                  setCurrentTranslation(liveText);
                 });
               } else {
                 // Schedule delayed update
@@ -226,7 +250,7 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
                 
                 throttleTimerRef.current = setTimeout(() => {
                   const latestText = pendingTextRef.current;
-                  if (latestText) {
+                  if (latestText !== null) {
                     lastUpdateTimeRef.current = Date.now();
                     flushSync(() => {
                       setCurrentTranslation(latestText);
@@ -235,12 +259,20 @@ export function ListenerPage({ sessionCodeProp, onBackToHome }) {
                 }, 50);
               }
             } else {
-              // Final translation - add to history and clear current
-              setTranslations(prev => [...prev, {
-                original: message.originalText,
-                translated: message.translatedText,
-                timestamp: message.timestamp
-              }].slice(-50)); // Keep last 50 translations
+              // Final translation - process through segmenter (deduplicated)
+              const finalText = message.translatedText;
+              const { flushedSentences } = segmenterRef.current.processFinal(finalText);
+              
+              // Add deduplicated sentences to history
+              if (flushedSentences.length > 0) {
+                const joinedText = flushedSentences.join(' ').trim();
+                setTranslations(prev => [...prev, {
+                  original: message.originalText,
+                  translated: joinedText,
+                  timestamp: message.timestamp
+                }].slice(-50));
+              }
+              
               setCurrentTranslation('');
             }
             break;

@@ -7,6 +7,7 @@ import { ConnectionStatus } from './ConnectionStatus'
 import { Header } from './Header'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAudioCapture } from '../hooks/useAudioCapture'
+import { SentenceSegmenter } from '../utils/sentenceSegmenter'
 
 const LANGUAGES = [
   { code: 'en', name: 'English' },
@@ -81,6 +82,36 @@ function TranslationInterface({ onBackToHome }) {
   const lastUpdateTimeRef = useRef(0)
   const pendingTextRef = useRef(null)
   const throttleTimerRef = useRef(null)
+  
+  // Sentence segmenter for smart text management
+  const segmenterRef = useRef(null)
+  const sendMessageRef = useRef(null)
+  
+  if (!segmenterRef.current) {
+    segmenterRef.current = new SentenceSegmenter({
+      maxSentences: 3,      // Keep max 3 sentences in live view
+      maxChars: 500,        // Force flush after 500 chars
+      maxTimeMs: 15000,     // Force flush after 15 seconds
+      onFlush: (flushedSentences) => {
+        // Move flushed sentences to history immediately
+        const joinedText = flushedSentences.join(' ').trim()
+        if (joinedText) {
+          setFinalTranslations(prev => [...prev, {
+            id: Date.now() + Math.random(),
+            original: '',
+            translated: joinedText,
+            timestamp: Date.now(),
+            sequenceId: -1,
+            isSegmented: true  // Flag to indicate this was auto-segmented
+          }])
+          
+          // Note: No backend force-commit needed
+          // OpenAI partials are cumulative per turn - we can't control mid-turn breaks
+          // The stripping logic above handles display by hiding already-shown content
+        }
+      }
+    })
+  }
 
   // Memoize WebSocket URL calculation to prevent re-computation on every render
   const finalWebSocketUrl = useMemo(() => {
@@ -110,6 +141,9 @@ function TranslationInterface({ onBackToHome }) {
     connectionState,
     addMessageHandler
   } = useWebSocket(finalWebSocketUrl)
+  
+  // Update sendMessage ref for segmenter callback
+  sendMessageRef.current = sendMessage
 
   const {
     startRecording,
@@ -131,12 +165,15 @@ function TranslationInterface({ onBackToHome }) {
         break
       case 'translation':
         if (message.isPartial) {
-          // 🔴 LIVE PARTIAL: Throttle updates for smooth streaming
-          const text = message.originalText || message.translatedText
+          // 🔴 LIVE PARTIAL: Run through sentence segmenter + throttle for smooth streaming
+          const rawText = message.originalText || message.translatedText
           const now = Date.now()
           
-          // Store the latest text
-          pendingTextRef.current = text
+          // Process through segmenter (auto-flushes complete sentences to history)
+          const { liveText } = segmenterRef.current.processPartial(rawText)
+          
+          // Store the segmented text
+          pendingTextRef.current = liveText
           
           // THROTTLE: Update max 20 times per second (50ms intervals)
           const timeSinceLastUpdate = now - lastUpdateTimeRef.current
@@ -145,9 +182,9 @@ function TranslationInterface({ onBackToHome }) {
             // Immediate update with forced sync render
             lastUpdateTimeRef.current = now
             flushSync(() => {
-              setLivePartial(text)
+              setLivePartial(liveText)
             })
-            console.log(`[TranslationInterface] ⚡ IMMEDIATE: "${text.substring(0, 30)}..." [${text.length}chars]`)
+            console.log(`[TranslationInterface] ⚡ IMMEDIATE: "${liveText.substring(0, 30)}..." [${liveText.length}chars]`)
           } else {
             // Schedule delayed update
             if (throttleTimerRef.current) {
@@ -156,7 +193,7 @@ function TranslationInterface({ onBackToHome }) {
             
             throttleTimerRef.current = setTimeout(() => {
               const latestText = pendingTextRef.current
-              if (latestText) {
+              if (latestText !== null) {
                 lastUpdateTimeRef.current = Date.now()
                 flushSync(() => {
                   setLivePartial(latestText)
@@ -166,17 +203,24 @@ function TranslationInterface({ onBackToHome }) {
             }, 50)
           }
         } else {
-          // 📝 FINAL: Move to history and clear live partial
-          console.log(`[TranslationInterface] 📝 FINAL: "${message.translatedText.substring(0, 50)}..." - Moving to history`)
+          // 📝 FINAL: Process through segmenter to flush ONLY NEW text (deduplicated)
+          const finalText = message.translatedText
+          console.log(`[TranslationInterface] 📝 FINAL: "${finalText.substring(0, 50)}..." - Processing through segmenter`)
           
-          // Add to final translations
-          setFinalTranslations(prev => [...prev, {
-            id: Date.now(),
-            original: message.originalText || '',
-            translated: message.translatedText,
-            timestamp: message.timestamp || Date.now(),
-            sequenceId: message.sequenceId
-          }])
+          // Segmenter deduplicates and returns only new sentences
+          const { flushedSentences } = segmenterRef.current.processFinal(finalText)
+          
+          // Add deduplicated sentences to history
+          if (flushedSentences.length > 0) {
+            const joinedText = flushedSentences.join(' ').trim()
+            setFinalTranslations(prev => [...prev, {
+              id: Date.now(),
+              original: message.originalText || '',
+              translated: joinedText,
+              timestamp: message.timestamp || Date.now(),
+              sequenceId: message.sequenceId
+            }])
+          }
           
           // Clear live partial for next segment
           setLivePartial('')

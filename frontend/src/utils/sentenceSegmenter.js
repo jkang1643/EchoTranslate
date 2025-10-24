@@ -1,0 +1,234 @@
+/**
+ * Smart Sentence Segmenter
+ * 
+ * Monitors streaming text, detects sentence boundaries, and manages live display
+ * to prevent text from growing indefinitely while keeping the UX smooth.
+ */
+
+export class SentenceSegmenter {
+  constructor(options = {}) {
+    this.maxSentences = options.maxSentences || 3;  // Max sentences in live view
+    this.maxChars = options.maxChars || 500;        // Force flush after this many chars
+    this.maxTimeMs = options.maxTimeMs || 15000;    // Force flush after 15 seconds
+    
+    // State
+    this.liveText = '';           // Current accumulated text
+    this.flushedText = '';        // Text that has already been flushed (to prevent duplicates)
+    this.cumulativeText = '';     // Full cumulative text from OpenAI (for overlap detection)
+    this.lastUpdateTime = Date.now();
+    this.onFlush = options.onFlush || (() => {});  // Callback when sentences move to history
+  }
+
+  /**
+   * Find overlap between the end of old text and the start of new text
+   * This handles OpenAI's cumulative transcription
+   */
+  findOverlap(oldText, newText) {
+    if (!oldText || !newText) return 0;
+    
+    const minLen = Math.min(oldText.length, newText.length);
+    
+    // Try progressively smaller suffixes of oldText against prefixes of newText
+    for (let i = minLen; i > 20; i--) { // Min 20 chars overlap to avoid false matches
+      const oldSuffix = oldText.slice(-i);
+      if (newText.startsWith(oldSuffix)) {
+        return i;
+      }
+    }
+    
+    return 0;
+  }
+
+  /**
+   * Detect sentence boundaries in text
+   * Returns array of sentences (including incomplete last sentence)
+   */
+  detectSentences(text) {
+    if (!text) return [];
+    
+    // Regex to split on sentence endings (., !, ?, …) followed by space or end
+    // Preserve the punctuation with the sentence
+    const sentenceRegex = /[^.!?…]+[.!?…]+[\s]*/g;
+    const matches = text.match(sentenceRegex) || [];
+    
+    // Check if text ends with incomplete sentence
+    const lastMatch = matches[matches.length - 1];
+    const hasIncompleteSentence = lastMatch ? !text.endsWith(lastMatch.trim()) : text.length > 0;
+    
+    if (hasIncompleteSentence) {
+      // Extract the incomplete part
+      const completeText = matches.join('');
+      const incompletePart = text.substring(completeText.length);
+      if (incompletePart.trim()) {
+        matches.push(incompletePart);
+      }
+    }
+    
+    return matches.map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  /**
+   * Check if a sentence is complete (ends with punctuation)
+   */
+  isComplete(sentence) {
+    if (!sentence) return false;
+    const trimmed = sentence.trim();
+    return /[.!?…]$/.test(trimmed);
+  }
+
+  /**
+   * Process incoming partial text (cumulative from OpenAI)
+   * Returns: { liveText, flushedSentences }
+   */
+  processPartial(cumulativeText) {
+    const now = Date.now();
+    
+    // Step 1: Detect if this is a new turn (text got shorter = VAD pause)
+    if (this.cumulativeText && cumulativeText.length < this.cumulativeText.length * 0.5) {
+      console.log(`[Segmenter] 🔄 New turn detected (text reset from ${this.cumulativeText.length} → ${cumulativeText.length})`);
+      this.cumulativeText = '';
+      this.flushedText = '';
+    }
+    
+    // Step 2: Find overlap between previous cumulative and new cumulative
+    const overlap = this.findOverlap(this.cumulativeText, cumulativeText);
+    
+    // Step 3: Extract only the NEW delta (text after overlap)
+    const delta = overlap > 0 ? cumulativeText.slice(overlap).trim() : cumulativeText;
+    
+    if (overlap > 0) {
+      console.log(`[Segmenter] ✂️ Overlap detected: ${overlap} chars, delta: "${delta.substring(0, 40)}..."`);
+    }
+    
+    // Update cumulative tracker
+    this.cumulativeText = cumulativeText;
+    
+    // Step 4: Check CUMULATIVE text for sentence count BEFORE stripping
+    // This is critical - we need to detect 3+ sentences in the full cumulative stream
+    const allSentences = this.detectSentences(cumulativeText);
+    const allCompleteSentences = allSentences.filter(s => this.isComplete(s));
+    const incompleteSentence = allSentences.find(s => !this.isComplete(s)) || '';
+    
+    // DEBUG: Log sentence count
+    console.log(`[Segmenter] 📊 CUMULATIVE has ${allCompleteSentences.length} complete sentences (max: ${this.maxSentences})`);
+    if (allCompleteSentences.length > 0) {
+      console.log(`[Segmenter] 📝 Sentences: ${allCompleteSentences.map(s => s.substring(0, 30) + '...').join(' | ')}`);
+    }
+    
+    let flushedSentences = [];
+    
+    // RULE 1: If CUMULATIVE has >= maxSentences complete sentences, flush oldest ones
+    // This simulates a "pause" - send to history and clear live view
+    if (allCompleteSentences.length >= this.maxSentences) {
+      // Flush the first N sentences (where N = total - max + 1)
+      // Example: 5 sentences, max 3 → flush first 3, keep last 2
+      const numToFlush = allCompleteSentences.length - this.maxSentences + 1;
+      flushedSentences = allCompleteSentences.slice(0, numToFlush);
+      
+      // Track what we flushed to prevent duplicates
+      this.flushedText += ' ' + flushedSentences.join(' ');
+      this.flushedText = this.flushedText.trim();
+      
+      console.log(`[Segmenter] 📦 AUTO-FLUSH: ${flushedSentences.length} sentence(s) → history`);
+      console.log(`[Segmenter] 🎯 Flushed text length now: ${this.flushedText.length} chars`);
+    }
+    
+    // RULE 2: If cumulative text exceeds maxChars, force flush complete sentences
+    else if (cumulativeText.length > this.maxChars && allCompleteSentences.length > 0) {
+      flushedSentences = allCompleteSentences;
+      
+      this.flushedText += ' ' + flushedSentences.join(' ');
+      this.flushedText = this.flushedText.trim();
+      
+      console.log(`[Segmenter] 📦 CHAR-FLUSH: ${flushedSentences.length} sentence(s) → history (exceeded ${this.maxChars} chars)`);
+    }
+    
+    // RULE 3: If too much time has passed, flush all complete sentences
+    else if (now - this.lastUpdateTime > this.maxTimeMs && allCompleteSentences.length > 0) {
+      flushedSentences = allCompleteSentences;
+      
+      this.flushedText += ' ' + flushedSentences.join(' ');
+      this.flushedText = this.flushedText.trim();
+      
+      console.log(`[Segmenter] 📦 TIME-FLUSH: ${flushedSentences.length} sentence(s) → history (exceeded ${this.maxTimeMs}ms)`);
+      this.lastUpdateTime = now;
+    }
+    
+    // Trigger flush callback if we have sentences to flush
+    if (flushedSentences.length > 0) {
+      this.onFlush(flushedSentences);
+      this.lastUpdateTime = now;
+    }
+    
+    // Step 5: NOW strip flushed content from cumulative to show live display
+    if (this.flushedText) {
+      if (cumulativeText.includes(this.flushedText)) {
+        const flushedIndex = cumulativeText.lastIndexOf(this.flushedText);
+        const afterFlushed = cumulativeText.substring(flushedIndex + this.flushedText.length).trim();
+        this.liveText = afterFlushed;
+        console.log(`[Segmenter] 📍 Live display stripped to: "${afterFlushed.substring(0, 50)}..." (${afterFlushed.length} chars)`);
+      } else {
+        this.liveText = cumulativeText;
+      }
+    } else {
+      this.liveText = cumulativeText;
+    }
+    
+    return {
+      liveText: this.liveText,
+      flushedSentences
+    };
+  }
+
+  /**
+   * Process final text (when speaker pauses)
+   * Moves ONLY NEW text to history (deduplicates already-flushed content)
+   */
+  processFinal(finalText) {
+    let textToFlush = finalText;
+    
+    // Deduplicate: If we already flushed part of this text, only flush the new part
+    if (this.flushedText && finalText.includes(this.flushedText)) {
+      textToFlush = finalText.replace(this.flushedText, '').trim();
+      console.log(`[Segmenter] ✅ FINAL: Deduplicating (${this.flushedText.length} chars already flushed)`);
+    }
+    
+    const sentences = this.detectSentences(textToFlush);
+    
+    // Reset state for next segment
+    this.liveText = '';
+    this.flushedText = '';
+    this.lastUpdateTime = Date.now();
+    
+    console.log(`[Segmenter] ✅ FINAL: Moving ${sentences.length} NEW sentence(s) to history`);
+    
+    return {
+      liveText: '',
+      flushedSentences: sentences.filter(s => s.trim().length > 0)
+    };
+  }
+
+  /**
+   * Reset the segmenter
+   */
+  reset() {
+    this.liveText = '';
+    this.flushedText = '';
+    this.cumulativeText = '';
+    this.lastUpdateTime = Date.now();
+  }
+
+  /**
+   * Get current state
+   */
+  getState() {
+    const sentences = this.detectSentences(this.liveText);
+    return {
+      liveText: this.liveText,
+      sentenceCount: sentences.length,
+      charCount: this.liveText.length,
+      ageMs: Date.now() - this.lastUpdateTime
+    };
+  }
+}
+

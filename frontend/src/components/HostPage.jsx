@@ -9,6 +9,7 @@ import { useAudioCapture } from '../hooks/useAudioCapture';
 import { Header } from './Header';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LanguageSelector } from './LanguageSelector';
+import { SentenceSegmenter } from '../utils/sentenceSegmenter';
 
 // Dynamically determine backend URL based on frontend URL
 // If accessing via network IP, use the same IP for backend
@@ -119,6 +120,25 @@ export function HostPage({ onBackToHome }) {
   const lastUpdateTimeRef = useRef(0);
   const pendingTextRef = useRef(null);
   const throttleTimerRef = useRef(null);
+  
+  // Sentence segmenter for smart text management
+  const segmenterRef = useRef(null);
+  if (!segmenterRef.current) {
+    segmenterRef.current = new SentenceSegmenter({
+      maxSentences: 3,
+      maxChars: 500,
+      maxTimeMs: 15000,
+      onFlush: (flushedSentences) => {
+        const joinedText = flushedSentences.join(' ').trim();
+        if (joinedText) {
+          setTranscript(prev => [...prev, {
+            text: joinedText,
+            timestamp: Date.now()
+          }].slice(-10));
+        }
+      }
+    });
+  }
 
   // Create session on mount
   useEffect(() => {
@@ -212,13 +232,16 @@ export function HostPage({ onBackToHome }) {
             break;
           
           case 'translation':
-            // ✨ REAL-TIME STREAMING: Throttled word-by-word display
+            // ✨ REAL-TIME STREAMING: Sentence segmented + throttled display
             if (message.isPartial) {
-              const text = message.originalText || message.translatedText;
+              const rawText = message.originalText || message.translatedText;
               const now = Date.now();
               
-              // Store the latest text
-              pendingTextRef.current = text;
+              // Process through segmenter (auto-flushes complete sentences)
+              const { liveText } = segmenterRef.current.processPartial(rawText);
+              
+              // Store the segmented text
+              pendingTextRef.current = liveText;
               
               // THROTTLE: Update max 20 times per second (50ms intervals)
               const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
@@ -227,7 +250,7 @@ export function HostPage({ onBackToHome }) {
                 // Immediate update with forced sync render
                 lastUpdateTimeRef.current = now;
                 flushSync(() => {
-                  setCurrentTranscript(text);
+                  setCurrentTranscript(liveText);
                 });
               } else {
                 // Schedule delayed update
@@ -237,7 +260,7 @@ export function HostPage({ onBackToHome }) {
                 
                 throttleTimerRef.current = setTimeout(() => {
                   const latestText = pendingTextRef.current;
-                  if (latestText) {
+                  if (latestText !== null) {
                     lastUpdateTimeRef.current = Date.now();
                     flushSync(() => {
                       setCurrentTranscript(latestText);
@@ -246,11 +269,19 @@ export function HostPage({ onBackToHome }) {
                 }, 50);
               }
             } else {
-              // Final transcript - add to history and clear current
-              setTranscript(prev => [...prev, {
-                text: message.originalText || message.translatedText,
-                timestamp: message.timestamp || Date.now()
-              }].slice(-10)); // Keep last 10
+              // Final transcript - process through segmenter (deduplicated)
+              const finalText = message.originalText || message.translatedText;
+              const { flushedSentences } = segmenterRef.current.processFinal(finalText);
+              
+              // Add deduplicated sentences to history
+              if (flushedSentences.length > 0) {
+                const joinedText = flushedSentences.join(' ').trim();
+                setTranscript(prev => [...prev, {
+                  text: joinedText,
+                  timestamp: message.timestamp || Date.now()
+                }].slice(-10));
+              }
+              
               setCurrentTranscript('');
             }
             break;
