@@ -387,23 +387,23 @@ function TranslationInterface({ onBackToHome }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <Header />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {onBackToHome && (
           <button
             onClick={onBackToHome}
-            className="mb-4 px-4 py-2 text-gray-600 hover:text-gray-800 flex items-center gap-2 transition-colors"
+            className="mb-4 px-3 py-2 text-sm sm:text-base text-gray-600 hover:text-gray-800 flex items-center gap-2 transition-colors"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-3 h-3 sm:w-4 sm:h-4" />
             <span>Back to Home</span>
           </button>
         )}
         
         <div className="max-w-6xl mx-auto">
-          <div className="bg-white rounded-xl shadow-lg p-6">
+          <div className="bg-white rounded-lg sm:rounded-xl shadow-lg p-3 sm:p-6">
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-4">
-                <h2 className="text-2xl font-bold text-gray-900">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 gap-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+                <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900">
                   {sourceLang === targetLang ? 'Voice Transcription' : 'Voice Translation'} - Solo Mode
                 </h2>
             <ConnectionStatus 
@@ -415,12 +415,12 @@ function TranslationInterface({ onBackToHome }) {
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Language Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
           <LanguageSelector
             label="Source Language"
             languages={LANGUAGES}
@@ -437,8 +437,8 @@ function TranslationInterface({ onBackToHome }) {
 
         {/* Settings Panel */}
         {showSettings && (
-          <div className="bg-gray-50 rounded-lg p-4 mb-6">
-            <h3 className="font-semibold text-gray-900 mb-3">Settings</h3>
+          <div className="bg-gray-50 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">Settings</h3>
             
             {/* Microphone Selector */}
             {availableDevices.length > 0 && (
@@ -482,49 +482,47 @@ function TranslationInterface({ onBackToHome }) {
         )}
 
         {/* Microphone Controls */}
-        <div className="flex items-center justify-center mb-8">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={isListening ? handleStopListening : handleStartListening}
-              disabled={!isConnected}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-105 ${
-                isListening
-                  ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
-                  : isConnected
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              {isListening ? (
-                <MicOff className="w-8 h-8" />
-              ) : (
-                <Mic className="w-8 h-8" />
-              )}
-            </button>
-            
-            {isListening && (
-              <div className="flex items-center space-x-3">
-                {/* LIVE Badge */}
-                <div className="flex items-center space-x-1 bg-red-500 text-white px-2 py-1 rounded font-bold text-xs">
-                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                  <span>LIVE</span>
-                </div>
-                <span className="text-sm text-gray-600">Streaming translation...</span>
-                {audioLevel > 0 && (
-                  <div className="flex space-x-1">
-                    {[...Array(5)].map((_, i) => (
-                      <div
-                        key={i}
-                        className={`w-1 h-4 rounded transition-all ${
-                          i < (audioLevel * 5) ? 'bg-red-500' : 'bg-gray-300'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+        <div className="flex flex-col items-center justify-center mb-4 sm:mb-8 gap-3">
+          <button
+            onClick={isListening ? handleStopListening : handleStartListening}
+            disabled={!isConnected}
+            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-105 ${
+              isListening
+                ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+                : isConnected
+                ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            {isListening ? (
+              <MicOff className="w-6 h-6 sm:w-8 sm:h-8" />
+            ) : (
+              <Mic className="w-6 h-6 sm:w-8 sm:h-8" />
             )}
-          </div>
+          </button>
+          
+          {isListening && (
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+              {/* LIVE Badge */}
+              <div className="flex items-center space-x-1 bg-red-500 text-white px-2 py-1 rounded font-bold text-xs">
+                <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                <span>LIVE</span>
+              </div>
+              <span className="text-xs sm:text-sm text-gray-600">Streaming translation...</span>
+              {audioLevel > 0 && (
+                <div className="flex space-x-1">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-1 h-3 sm:h-4 rounded transition-all ${
+                        i < (audioLevel * 5) ? 'bg-red-500' : 'bg-gray-300'
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Translation Display */}

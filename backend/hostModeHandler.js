@@ -79,17 +79,32 @@ export async function handleHostConnection(clientWs, sessionId) {
               // Set up result callback - handles both partials and finals
               speechStream.onResult(async (transcriptText, isPartial) => {
                 if (isPartial) {
-                  // Live partial transcript - send original immediately to ALL listeners
+                  // Send live partial transcript to the HOST first
+                  if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(JSON.stringify({
+                      type: 'translation',
+                      originalText: transcriptText,
+                      translatedText: transcriptText,
+                      sourceLang: currentSourceLang,
+                      targetLang: currentSourceLang,
+                      timestamp: Date.now(),
+                      sequenceId: -1,
+                      isPartial: true
+                    }));
+                  }
+                  
+                  // Also broadcast to ALL listeners so they can see the original text
+                  // Frontend will filter using hasTranslation flag to avoid flipping
                   sessionStore.broadcastToListeners(sessionId, {
                     type: 'translation',
                     originalText: transcriptText,
-                    translatedText: transcriptText, // Default to source
+                    translatedText: transcriptText, // Default to source (will be overridden for translated languages)
                     sourceLang: currentSourceLang,
                     targetLang: currentSourceLang,
                     timestamp: Date.now(),
                     sequenceId: -1,
                     isPartial: true,
-                    hasTranslation: false
+                    hasTranslation: false // Flag to indicate this is just the original, not translated yet
                   });
                   
                   // Throttled translation for listeners with different target languages
@@ -171,10 +186,24 @@ export async function handleHostConnection(clientWs, sessionId) {
                   return;
                 }
                 
-                // Final transcript - translate and broadcast
+                // Final transcript - send to host and translate for listeners
                 console.log(`[HostMode] 📝 FINAL Transcript: "${transcriptText.substring(0, 50)}..."`);
                 
-                // Get all target languages needed
+                // Send final transcript to the HOST
+                if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+                  clientWs.send(JSON.stringify({
+                    type: 'translation',
+                    originalText: transcriptText,
+                    translatedText: transcriptText,
+                    sourceLang: currentSourceLang,
+                    targetLang: currentSourceLang,
+                    timestamp: Date.now(),
+                    sequenceId: Date.now(),
+                    isPartial: false
+                  }));
+                }
+                
+                // Get all target languages needed for listeners
                 const targetLanguages = sessionStore.getSessionLanguages(sessionId);
                 
                 if (targetLanguages.length === 0) {

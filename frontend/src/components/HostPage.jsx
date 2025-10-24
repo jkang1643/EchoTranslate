@@ -358,18 +358,18 @@ export function HostPage({ onBackToHome }) {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <Header />
       
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {/* Back button */}
         <button
           onClick={onBackToHome}
-          className="mb-4 px-4 py-2 text-gray-600 hover:text-gray-800 flex items-center gap-2"
+          className="mb-4 px-3 py-2 text-sm sm:text-base text-gray-600 hover:text-gray-800 flex items-center gap-2"
         >
           ← Back to Home
         </button>
 
         {/* Session Info Card */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h2 className="text-2xl font-bold mb-4 text-gray-800">Live Translation Session - Host</h2>
+        <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6 mb-4 sm:mb-6">
+          <h2 className="text-lg sm:text-xl md:text-2xl font-bold mb-3 sm:mb-4 text-gray-800">Live Translation - Host</h2>
           
           {error && (
             <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
@@ -379,17 +379,17 @@ export function HostPage({ onBackToHome }) {
 
           {/* Session Code Display */}
           {sessionCode && (
-            <div className="mb-6 text-center">
-              <p className="text-gray-600 mb-2">Session Code:</p>
-              <div className="text-5xl font-bold text-indigo-600 tracking-wider mb-4">
+            <div className="mb-4 sm:mb-6 text-center">
+              <p className="text-sm sm:text-base text-gray-600 mb-2">Session Code:</p>
+              <div className="text-3xl sm:text-4xl md:text-5xl font-bold text-indigo-600 tracking-wider mb-3 sm:mb-4">
                 {sessionCode}
               </div>
               
               {/* QR Code */}
               {qrDataUrl && (
                 <div className="flex flex-col items-center gap-2">
-                  <img src={qrDataUrl} alt="QR Code" className="border-4 border-gray-200 rounded-lg" />
-                  <p className="text-sm text-gray-500">Listeners can scan this code to join</p>
+                  <img src={qrDataUrl} alt="QR Code" className="border-2 sm:border-4 border-gray-200 rounded-lg w-48 h-48 sm:w-auto sm:h-auto" />
+                  <p className="text-xs sm:text-sm text-gray-500">Listeners can scan this code to join</p>
                 </div>
               )}
             </div>
@@ -399,7 +399,7 @@ export function HostPage({ onBackToHome }) {
           <ConnectionStatus state={connectionState} />
 
           {/* Language Selection */}
-          <div className="mb-6">
+          <div className="mb-4 sm:mb-6">
             <LanguageSelector
               label="Speaking Language"
               languages={LANGUAGES}
@@ -409,19 +409,19 @@ export function HostPage({ onBackToHome }) {
           </div>
 
           {/* Broadcast Controls */}
-          <div className="flex justify-center gap-4 mb-6">
+          <div className="flex justify-center gap-3 sm:gap-4 mb-4 sm:mb-6">
             {!isStreaming ? (
               <button
                 onClick={handleStartBroadcast}
                 disabled={connectionState !== 'open'}
-                className="px-8 py-4 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white font-semibold rounded-lg shadow-lg transition-all transform hover:scale-105 disabled:scale-100"
+                className="px-6 py-3 sm:px-8 sm:py-4 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm sm:text-base font-semibold rounded-lg shadow-lg transition-all transform hover:scale-105 disabled:scale-100"
               >
                 🎙️ Start Broadcasting
               </button>
             ) : (
               <button
                 onClick={handleStopBroadcast}
-                className="px-8 py-4 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all transform hover:scale-105"
+                className="px-6 py-3 sm:px-8 sm:py-4 bg-gray-500 hover:bg-gray-600 text-white text-sm sm:text-base font-semibold rounded-lg shadow-lg transition-all transform hover:scale-105"
               >
                 ⏹️ Stop Broadcasting
               </button>
@@ -430,9 +430,9 @@ export function HostPage({ onBackToHome }) {
 
           {/* Audio Level Indicator */}
           {isStreaming && (
-            <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-2">Audio Level:</p>
-              <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+            <div className="mb-4 sm:mb-6">
+              <p className="text-xs sm:text-sm text-gray-600 mb-2">Audio Level:</p>
+              <div className="w-full bg-gray-200 rounded-full h-3 sm:h-4 overflow-hidden">
                 <div
                   className="bg-green-500 h-full transition-all duration-100"
                   style={{ width: `${audioLevel * 100}%` }}
@@ -442,16 +442,16 @@ export function HostPage({ onBackToHome }) {
           )}
 
           {/* Listener Stats */}
-          <div className="mb-6 p-4 bg-indigo-50 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-2">📊 Listener Statistics</h3>
-            <p className="text-2xl font-bold text-indigo-600">{listenerCount} Listeners</p>
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-indigo-50 rounded-lg">
+            <h3 className="text-sm sm:text-base font-semibold text-gray-800 mb-2">📊 Listener Statistics</h3>
+            <p className="text-xl sm:text-2xl font-bold text-indigo-600">{listenerCount} Listeners</p>
             
             {Object.keys(languageStats).length > 0 && (
               <div className="mt-3">
-                <p className="text-sm text-gray-600 mb-1">By Language:</p>
+                <p className="text-xs sm:text-sm text-gray-600 mb-1">By Language:</p>
                 <div className="grid grid-cols-2 gap-2">
                   {Object.entries(languageStats).map(([lang, count]) => (
-                    <div key={lang} className="flex justify-between text-sm">
+                    <div key={lang} className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-700">{lang}:</span>
                       <span className="font-semibold">{count}</span>
                     </div>
@@ -463,71 +463,118 @@ export function HostPage({ onBackToHome }) {
         </div>
 
         {/* LIVE TRANSCRIPTION AREA - FIXED POSITION, INLINE UPDATES */}
-        {(currentTranscript || isStreaming) && (
-          <div className="bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center space-x-3 mb-4">
+        <div className="bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 rounded-lg sm:rounded-2xl p-3 sm:p-6 shadow-2xl mb-4 sm:mb-6 -mx-2 sm:mx-0">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
               {isStreaming && (
                 <div className="flex space-x-1">
-                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce"></div>
-                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.15s'}}></div>
-                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.3s'}}></div>
+                  <div className="w-1.5 h-1.5 sm:w-2.5 sm:h-2.5 bg-white rounded-full animate-bounce"></div>
+                  <div className="w-1.5 h-1.5 sm:w-2.5 sm:h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.15s'}}></div>
+                  <div className="w-1.5 h-1.5 sm:w-2.5 sm:h-2.5 bg-white rounded-full animate-bounce" style={{animationDelay: '0.3s'}}></div>
                 </div>
               )}
-              <span className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1 sm:gap-2">
                 {isStreaming ? (
                   <>
-                    <span className="relative flex h-2.5 w-2.5">
+                    <span className="relative flex h-2 w-2 sm:h-2.5 sm:w-2.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-white"></span>
                     </span>
-                    LIVE TRANSCRIPTION
+                    <span className="hidden sm:inline">LIVE TRANSCRIPTION</span>
+                    <span className="sm:hidden">LIVE</span>
                   </>
                 ) : (
                   'READY'
                 )}
               </span>
             </div>
-            
-            <div className="bg-white/95 backdrop-blur rounded-xl p-6 min-h-[140px] transition-none">
-              {currentTranscript ? (
-                <p className="text-gray-900 font-semibold text-3xl leading-relaxed tracking-wide">
-                  {currentTranscript}
-                  {isStreaming && (
-                    <span className="inline-block w-1 h-8 ml-2 bg-blue-600 animate-pulse"></span>
-                  )}
-                </p>
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-gray-400 text-xl">
-                    {isStreaming ? 'Listening for speech...' : 'Click "Start Broadcasting" to begin'}
-                  </p>
-                </div>
-              )}
-            </div>
-            
-            <div className="mt-3 text-xs text-white/80 font-medium">
-              {isStreaming ? 'Words update in real-time • Broadcasting to all listeners' : 'Ready to broadcast'}
-            </div>
+            {currentTranscript && (
+              <button
+                onClick={() => navigator.clipboard.writeText(currentTranscript)}
+                className="p-1 sm:p-1.5 text-white/80 hover:text-white transition-colors"
+                title="Copy live text"
+              >
+                📋
+              </button>
+            )}
           </div>
-        )}
+          
+          <div className="bg-white/95 backdrop-blur rounded-lg sm:rounded-xl p-3 sm:p-6 min-h-[100px] sm:min-h-[140px] max-h-[300px] sm:max-h-[400px] overflow-y-auto transition-none scroll-smooth">
+            {currentTranscript ? (
+              <p className="text-gray-900 font-semibold text-xl sm:text-2xl md:text-3xl leading-relaxed tracking-wide break-words">
+                {currentTranscript}
+                {isStreaming && (
+                  <span className="inline-block w-0.5 sm:w-1 h-6 sm:h-8 ml-1 sm:ml-2 bg-blue-600 animate-pulse"></span>
+                )}
+              </p>
+            ) : (
+              <div className="flex items-center justify-center h-full min-h-[100px] sm:min-h-[140px]">
+                <p className="text-gray-400 text-base sm:text-lg md:text-xl text-center px-2">
+                  {isStreaming ? 'Ready • Start speaking...' : 'Click "Start Broadcasting"'}
+                </p>
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-2 sm:mt-3 text-xs text-white/80 font-medium">
+            {currentTranscript ? (
+              <>🔴 LIVE • Broadcasting to {listenerCount} {listenerCount === 1 ? 'listener' : 'listeners'}</>
+            ) : isStreaming ? (
+              <>Ready • Start speaking to broadcast</>
+            ) : (
+              <>Click "Start Broadcasting" to begin</>
+            )}
+          </div>
+        </div>
 
         {/* History - Completed transcripts */}
         {transcript.length > 0 && (
-          <div className="bg-gray-50 rounded-xl p-5 border-2 border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-              <span className="text-blue-600">📝</span>
-              History
-              <span className="text-xs text-gray-500 font-normal">
-                (last 10 segments)
-              </span>
-            </h3>
-            <div className="space-y-3">
+          <div className="bg-gray-50 rounded-lg sm:rounded-xl p-3 sm:p-5 border-2 border-gray-200 -mx-2 sm:mx-0">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-gray-700 flex items-center gap-1 sm:gap-2">
+                <span className="text-blue-600">📝</span>
+                History
+                <span className="text-xs text-gray-500 font-normal">
+                  ({transcript.length})
+                </span>
+              </h3>
+              <button
+                onClick={() => {
+                  const content = transcript.map(t => `${t.text}\n---`).join('\n')
+                  const blob = new Blob([content], { type: 'text/plain' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `transcription-${new Date().toISOString().split('T')[0]}.txt`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                }}
+                className="flex items-center space-x-1 px-2 sm:px-3 py-1 text-xs sm:text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                <span>📥</span>
+                <span className="hidden sm:inline">Download</span>
+              </button>
+            </div>
+            <div className="space-y-2 sm:space-y-3 max-h-80 sm:max-h-96 overflow-y-auto pr-1 sm:pr-2">
               {transcript.slice().reverse().map((item, index) => (
-                <div key={index} className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
-                  <p className="text-gray-800 text-base leading-relaxed">{item.text}</p>
-                  <p className="text-xs text-gray-400 mt-2">
-                    {new Date(item.timestamp).toLocaleTimeString()}
-                  </p>
+                <div key={index} className="p-3 sm:p-4 bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-blue-600 uppercase">Transcription</span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(item.text)}
+                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Copy"
+                    >
+                      📋
+                    </button>
+                  </div>
+                  <p className="text-gray-900 text-sm sm:text-base font-medium leading-relaxed">{item.text}</p>
+                  <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-100 text-xs text-gray-400 flex items-center justify-between">
+                    <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
+                    <span className="text-gray-300">#{transcript.length - index}</span>
+                  </div>
                 </div>
               ))}
             </div>
