@@ -173,8 +173,12 @@ class SessionStore {
 
     listeners.forEach(listener => {
       if (listener.socket.readyState === 1) { // WebSocket.OPEN
-        listener.socket.send(messageStr);
-        sentCount++;
+        try {
+          listener.socket.send(messageStr);
+          sentCount++;
+        } catch (error) {
+          console.error(`[SessionStore] Error sending to listener:`, error.message);
+        }
       }
     });
 

@@ -9,10 +9,17 @@
     "frontend:dev": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "start": "cd backend && npm start",
+    "lint": "eslint .",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "@eslint/css": "^0.13.0",
+    "@eslint/js": "^9.38.0",
+    "@eslint/json": "^0.13.2",
+    "concurrently": "^8.2.2",
+    "eslint": "^9.38.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.4.0"
   },
   "keywords": [
     "translation",

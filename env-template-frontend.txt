@@ -1,0 +1,21 @@
+# EchoTranslate Frontend Environment Variables
+# Copy this to frontend/.env.production for AWS deployment
+
+# ===================================
+# Backend API Configuration
+# ===================================
+
+# Backend API URL (HTTP/HTTPS)
+# Replace YOUR_EC2_IP with your actual EC2 Elastic IP
+VITE_API_URL=http://YOUR_EC2_IP
+
+# Backend WebSocket URL (WS/WSS)
+# Replace YOUR_EC2_IP with your actual EC2 Elastic IP
+VITE_WS_URL=ws://YOUR_EC2_IP/translate
+
+# ===================================
+# For HTTPS/WSS (after setting up SSL)
+# ===================================
+# VITE_API_URL=https://api.yourdomain.com
+# VITE_WS_URL=wss://api.yourdomain.com/translate
+

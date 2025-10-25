@@ -285,6 +285,11 @@ export async function handleHostConnection(clientWs, sessionId) {
     }
   });
 
+  // Handle WebSocket errors
+  clientWs.on('error', (error) => {
+    console.error('[HostMode] Host WebSocket error:', error.message);
+  });
+
   // Handle host disconnect
   clientWs.on('close', () => {
     console.log('[HostMode] Host disconnected from session');

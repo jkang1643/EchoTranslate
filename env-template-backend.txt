@@ -1,0 +1,29 @@
+# EchoTranslate Backend Environment Variables
+# Copy this to backend/.env and fill in your actual values
+
+# ===================================
+# API Keys (REQUIRED)
+# ===================================
+
+# OpenAI API Key (required for translation)
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Google Cloud Speech API Key (required for transcription)
+# Get from: https://console.cloud.google.com/apis/credentials
+GOOGLE_SPEECH_API_KEY=your-google-api-key-here
+
+# Alternative: Use Service Account JSON (more secure for production)
+# Upload your service account JSON file and set this path:
+# GOOGLE_APPLICATION_CREDENTIALS=/home/ubuntu/realtimetranslationapp/backend/google-credentials.json
+
+# ===================================
+# Server Configuration
+# ===================================
+
+# Server port (default: 3001)
+PORT=3001
+
+# Node environment (development|production)
+NODE_ENV=production
+

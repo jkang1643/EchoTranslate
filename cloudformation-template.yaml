@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EchoTranslate - Automated AWS Deployment Stack (EC2 + S3 + CloudFront)'
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+    ConstraintDescription: Must be an existing EC2 KeyPair
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+    Description: EC2 instance type
+
+  SSHLocation:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: IP address range allowed to SSH (CIDR notation)
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+
+  DomainName:
+    Type: String
+    Default: ''
+    Description: (Optional) Custom domain name for CloudFront
+
+Resources:
+  # ===================================
+  # EC2 Instance for Backend
+  # ===================================
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: echotranslate-backend-sg
+      GroupDescription: Security group for EchoTranslate backend
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
+          CidrIp: 0.0.0.0/0
+          Description: WebSocket access
+      Tags:
+        - Key: Name
+          Value: echotranslate-backend-sg
+
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub
+        - '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/${Arch}/hvm/ebs-gp2/ami-id}}'
+        - Arch: amd64
+      KeyName: !Ref KeyPairName
+      SecurityGroups:
+        - !Ref BackendSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          
+          # Update system
+          apt-get update
+          apt-get upgrade -y
+          
+          # Install Node.js 18
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+          
+          # Install PM2
+          npm install -g pm2
+          
+          # Install other utilities
+          apt-get install -y git nginx
+          
+          # Configure firewall
+          ufw allow OpenSSH
+          ufw allow 'Nginx Full'
+          ufw allow 3001/tcp
+          echo "y" | ufw enable
+          
+          # Setup PM2 startup
+          pm2 startup systemd -u ubuntu --hp /home/ubuntu
+          
+          # Create placeholder for application
+          mkdir -p /home/ubuntu/realtimetranslationapp/backend
+          chown -R ubuntu:ubuntu /home/ubuntu/realtimetranslationapp
+          
+          # Signal completion
+          echo "EC2 setup complete" > /home/ubuntu/setup-complete.txt
+          
+      Tags:
+        - Key: Name
+          Value: echotranslate-backend
+
+  BackendEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref BackendInstance
+      Tags:
+        - Key: Name
+          Value: echotranslate-backend-eip
+
+  # ===================================
+  # S3 Bucket for Frontend
+  # ===================================
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'echotranslate-frontend-${AWS::AccountId}'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: echotranslate-frontend
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+  # ===================================
+  # CloudFront Distribution
+  # ===================================
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: EchoTranslate Frontend Distribution
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.DomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          Compress: true
+          MinTTL: 0
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Name
+          Value: echotranslate-cloudfront
+
+Outputs:
+  BackendInstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref BackendInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendInstanceId'
+
+  BackendPublicIP:
+    Description: Backend Public IP (use this for API/WebSocket)
+    Value: !Ref BackendEIP
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendPublicIP'
+
+  BackendSSHCommand:
+    Description: SSH command to connect to backend
+    Value: !Sub 'ssh -i ${KeyPairName}.pem ubuntu@${BackendEIP}'
+
+  S3BucketName:
+    Description: S3 Bucket for Frontend
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-S3Bucket'
+
+  S3WebsiteURL:
+    Description: S3 Website URL (HTTP only)
+    Value: !GetAtt FrontendBucket.WebsiteURL
+
+  CloudFrontDomainName:
+    Description: CloudFront Distribution URL (HTTPS)
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
+
+  CloudFrontURL:
+    Description: Full CloudFront URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID (for cache invalidation)
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontId'
+
+  BackendAPIURL:
+    Description: Backend API URL
+    Value: !Sub 'http://${BackendEIP}'
+
+  BackendWebSocketURL:
+    Description: Backend WebSocket URL
+    Value: !Sub 'ws://${BackendEIP}/translate'
+
+  NextSteps:
+    Description: Next steps to complete deployment
+    Value: !Sub |
+      1. SSH to EC2: ssh -i ${KeyPairName}.pem ubuntu@${BackendEIP}
+      2. Upload your code to: /home/ubuntu/realtimetranslationapp/
+      3. Create .env file with API keys
+      4. Start backend: pm2 start server.js --name echotranslate-backend
+      5. Build frontend with: VITE_API_URL=http://${BackendEIP} VITE_WS_URL=ws://${BackendEIP}/translate
+      6. Deploy frontend: aws s3 sync frontend/dist/ s3://${FrontendBucket}/ --delete
+      7. Access app at: https://${CloudFrontDistribution.DomainName}
+
