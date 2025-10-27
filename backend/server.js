@@ -37,12 +37,15 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // Middleware
-// CORS configuration - allow frontend domain
+// CORS configuration - allow frontend domains
 app.use(cors({
   origin: [
-    'http://localhost:3000',           // Local development
-    'https://app.exbabel.com',         // Production
-    'http://app.exbabel.com'           // HTTP fallback
+    'http://localhost:3000',                        // Local development
+    'https://exbabel.com',                          // Marketing site
+    'https://www.exbabel.com',                      // Marketing www
+    'https://app.exbabel.com',                      // Application frontend
+    'https://d16uzf3jkdukna.cloudfront.net',       // CloudFront direct
+    'http://app.exbabel.com'                        // HTTP fallback
   ],
   credentials: true
 }));
