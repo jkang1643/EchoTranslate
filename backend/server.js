@@ -37,7 +37,15 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+// CORS configuration - allow frontend domain
+app.use(cors({
+  origin: [
+    'http://localhost:3000',           // Local development
+    'https://app.exbabel.com',         // Production
+    'http://app.exbabel.com'           // HTTP fallback
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Store active sessions for tracking
