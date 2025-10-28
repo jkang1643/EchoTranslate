@@ -3,6 +3,7 @@
  * Copyright (c) 2025 Exbabel. All Rights Reserved.
  * 
  * PROPRIETARY AND CONFIDENTIAL
+ * Updated: Rebuild with correct backend URL
  */
 
 import React, { useState, useEffect } from 'react'
