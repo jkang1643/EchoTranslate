@@ -392,5 +392,3 @@ if (!process.env.GOOGLE_SPEECH_API_KEY && !process.env.GOOGLE_APPLICATION_CREDEN
   console.warn("[Backend] Set either GOOGLE_SPEECH_API_KEY or GOOGLE_APPLICATION_CREDENTIALS");
 }
 console.log("[Backend] =====================================");
-// Test comment
-// Test comment
