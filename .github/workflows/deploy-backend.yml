@@ -32,11 +32,11 @@ jobs:
       
       - name: Deploy to EC2
         run: |
-          ssh -i ~/.ssh/deploy_key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key.pem ec2-user@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
             
             # Navigate to project directory
-            cd /home/ubuntu/realtimetranslationapp
+            cd /home/ec2-user/exbabel
             
             # Pull latest changes
             git fetch origin
@@ -55,7 +55,7 @@ jobs:
       
       - name: Verify deployment
         run: |
-          ssh -i ~/.ssh/deploy_key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key.pem ec2-user@${{ secrets.EC2_HOST }} << 'EOF'
             pm2 status exbabel-backend
             pm2 logs exbabel-backend --lines 20 --nostream
           EOF
