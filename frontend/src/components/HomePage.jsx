@@ -23,7 +23,7 @@ export function HomePage({ onSelectMode }) {
           {/* Welcome Section */}
           <div className="text-center mb-8 sm:mb-12">
             <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-800 mb-3 sm:mb-4">
-              Welcome to EchoTranslate
+              Welcome to Exbabel
             </h1>
             <p className="text-base sm:text-lg md:text-xl text-gray-600">
               Real-time translation for everyone, everywhere

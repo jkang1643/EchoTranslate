@@ -1,6 +1,6 @@
 # Quick Start: AWS Deployment
 
-Get your EchoTranslate app running on AWS in ~30 minutes!
+Get your Exbabel app running on AWS in ~30 minutes!
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ nano .env
 # GOOGLE_SPEECH_API_KEY=your-key-here
 
 # 5. Start backend (on EC2)
-pm2 start server.js --name echotranslate-backend
+pm2 start server.js --name exbabel-backend
 pm2 save
 
 # 6. Test (on EC2)
@@ -60,7 +60,7 @@ curl http://localhost:3001/health
 
 ```bash
 # On your local machine
-export BUCKET_NAME="echotranslate-frontend-$(date +%s)"
+export BUCKET_NAME="exbabel-frontend-$(date +%s)"
 
 # Create bucket
 aws s3 mb s3://${BUCKET_NAME} --region us-east-1
@@ -100,7 +100,7 @@ chmod +x deploy-frontend.sh
 ./deploy-frontend.sh
 
 # Enter when prompted:
-# - S3 bucket name: echotranslate-frontend-XXXXX
+# - S3 bucket name: exbabel-frontend-XXXXX
 # - CloudFront ID: (skip for now)
 # - Backend URL: YOUR_EC2_IP
 ```
@@ -110,7 +110,7 @@ chmod +x deploy-frontend.sh
 deploy-frontend.bat
 
 REM Enter when prompted:
-REM - S3 bucket name: echotranslate-frontend-XXXXX
+REM - S3 bucket name: exbabel-frontend-XXXXX
 REM - CloudFront ID: (skip for now)
 REM - Backend URL: YOUR_EC2_IP
 ```
@@ -179,7 +179,7 @@ wscat -c ws://YOUR_EC2_IP/translate
 ```bash
 # On EC2, check status
 pm2 status
-pm2 logs echotranslate-backend
+pm2 logs exbabel-backend
 
 # Check if port is open
 curl http://localhost:3001/health
@@ -252,7 +252,7 @@ cd /home/ubuntu/realtimetranslationapp/backend
 
 ## 🆘 Need Help?
 
-1. Check logs: `pm2 logs echotranslate-backend`
+1. Check logs: `pm2 logs exbabel-backend`
 2. Test health: `curl http://YOUR_EC2_IP/health`
 3. Verify API keys in `.env`
 4. Check Security Group rules

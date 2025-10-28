@@ -1,7 +1,7 @@
 {
-  "name": "echotranslate",
+  "name": "exbabel",
   "version": "1.0.0",
-  "description": "EchoTranslate - Real-time speech translation powered by Gemini AI",
+  "description": "Exbabel - Real-time speech translation powered by Gemini AI",
   "main": "backend/server.js",
   "scripts": {
     "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
@@ -27,9 +27,9 @@
     "realtime",
     "speech",
     "ai",
-    "echotranslate"
+    "exbabel"
   ],
-  "author": "EchoTranslate",
+  "author": "Exbabel",
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {

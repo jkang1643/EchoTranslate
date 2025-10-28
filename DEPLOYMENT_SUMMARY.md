@@ -2,7 +2,7 @@
 
 ## What I've Created for You
 
-I've prepared a **complete AWS deployment package** for your EchoTranslate real-time translation app. Everything you need to deploy to AWS with CloudFront, S3, and EC2 is ready!
+I've prepared a **complete AWS deployment package** for your Exbabel real-time translation app. Everything you need to deploy to AWS with CloudFront, S3, and EC2 is ready!
 
 ## 📦 Package Contents
 
@@ -116,7 +116,7 @@ open AWS_ARCHITECTURE_DIAGRAM.md
 
 # 2. Use CloudFormation (optional)
 aws cloudformation create-stack \
-  --stack-name echotranslate \
+  --stack-name exbabel \
   --template-body file://cloudformation-template.yaml \
   --parameters ParameterKey=KeyPairName,ParameterValue=your-key
 
@@ -304,7 +304,7 @@ See `AWS_ARCHITECTURE_DIAGRAM.md` for detailed breakdown.
 ### Issue? Check:
 1. **DEPLOYMENT_CHECKLIST.md** - Did you miss a step?
 2. **AWS_DEPLOYMENT_GUIDE.md** - Troubleshooting section
-3. Logs: `pm2 logs echotranslate-backend`
+3. Logs: `pm2 logs exbabel-backend`
 4. Health: `curl http://YOUR_EC2_IP/health`
 
 ### Common Problems Solved
@@ -382,5 +382,5 @@ Everything you need is ready. Your deployment package includes:
 *Created: $(date)*  
 *Package Version: 1.0*  
 *Target Platform: AWS (EC2 + S3 + CloudFront)*  
-*Application: EchoTranslate Real-time Translation*
+*Application: Exbabel Real-time Translation*
 

@@ -1,5 +1,5 @@
 {
-  "name": "echotranslate-frontend",
+  "name": "exbabel-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -28,6 +28,6 @@
     "tailwindcss": "^3.3.6",
     "vite": "^5.0.8"
   },
-  "author": "EchoTranslate",
+  "author": "Exbabel",
   "license": "UNLICENSED"
 }

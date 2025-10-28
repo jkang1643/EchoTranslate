@@ -1,9 +1,9 @@
 @echo off
-REM EchoTranslate - Frontend Deployment Script for AWS S3 + CloudFront (Windows)
+REM Exbabel - Frontend Deployment Script for AWS S3 + CloudFront (Windows)
 REM This script builds and deploys the frontend to S3 and invalidates CloudFront cache
 
 echo ========================================
-echo EchoTranslate Frontend Deployment
+echo Exbabel Frontend Deployment
 echo ========================================
 echo.
 

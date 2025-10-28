@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EchoTranslate - Frontend Deployment Script for AWS S3 + CloudFront
+# Exbabel - Frontend Deployment Script for AWS S3 + CloudFront
 # This script builds and deploys the frontend to S3 and invalidates CloudFront cache
 
 set -e  # Exit on error
@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}EchoTranslate Frontend Deployment${NC}"
+echo -e "${GREEN}Exbabel Frontend Deployment${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Check if AWS CLI is installed

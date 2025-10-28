@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EchoTranslate - Backend Update Script for EC2
+# Exbabel - Backend Update Script for EC2
 # Run this script ON your EC2 instance to update the backend
 
 set -e  # Exit on error
@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}EchoTranslate Backend Update${NC}"
+echo -e "${GREEN}Exbabel Backend Update${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Check if PM2 is installed
@@ -80,12 +80,12 @@ fi
 echo -e "${GREEN}✅ Environment variables configured${NC}"
 
 # Check if app is already running
-if pm2 list | grep -q "echotranslate-backend"; then
+if pm2 list | grep -q "exbabel-backend"; then
     echo -e "\n${YELLOW}🔄 Restarting backend...${NC}"
-    pm2 restart echotranslate-backend
+    pm2 restart exbabel-backend
 else
     echo -e "\n${YELLOW}🚀 Starting backend...${NC}"
-    pm2 start server.js --name echotranslate-backend
+    pm2 start server.js --name exbabel-backend
     pm2 save
 fi
 
@@ -94,7 +94,7 @@ echo -e "\n${YELLOW}⏳ Waiting for backend to start...${NC}"
 sleep 3
 
 # Check status
-pm2 status echotranslate-backend
+pm2 status exbabel-backend
 
 # Test health endpoint
 echo -e "\n${YELLOW}🏥 Testing health endpoint...${NC}"
@@ -102,13 +102,13 @@ if curl -f http://localhost:3001/health > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Backend is running!${NC}"
 else
     echo -e "${RED}❌ Health check failed${NC}"
-    echo -e "${YELLOW}Check logs with: pm2 logs echotranslate-backend${NC}"
+    echo -e "${YELLOW}Check logs with: pm2 logs exbabel-backend${NC}"
     exit 1
 fi
 
 # Show logs
 echo -e "\n${YELLOW}📋 Recent logs:${NC}"
-pm2 logs echotranslate-backend --lines 20 --nostream
+pm2 logs exbabel-backend --lines 20 --nostream
 
 # Summary
 echo -e "\n${GREEN}========================================${NC}"
@@ -116,9 +116,9 @@ echo -e "${GREEN}✅ Backend Update Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e "\n${YELLOW}Useful commands:${NC}"
 echo -e "  pm2 status                     - Check status"
-echo -e "  pm2 logs echotranslate-backend - View logs"
-echo -e "  pm2 restart echotranslate-backend - Restart"
-echo -e "  pm2 stop echotranslate-backend - Stop"
+echo -e "  pm2 logs exbabel-backend - View logs"
+echo -e "  pm2 restart exbabel-backend - Restart"
+echo -e "  pm2 stop exbabel-backend - Stop"
 echo -e "  curl http://localhost:3001/health - Health check"
 echo -e ""
 

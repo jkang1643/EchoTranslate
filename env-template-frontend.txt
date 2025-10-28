@@ -1,4 +1,4 @@
-# EchoTranslate Frontend Environment Variables
+# Exbabel Frontend Environment Variables
 # Copy this to frontend/.env.production for AWS deployment
 
 # ===================================

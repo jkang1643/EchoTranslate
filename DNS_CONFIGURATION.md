@@ -1,4 +1,4 @@
-# EchoTranslate DNS & Domain Configuration
+# Exbabel DNS & Domain Configuration
 
 **Last Updated:** October 27, 2025  
 **Domain:** exbabel.com  
@@ -175,7 +175,7 @@ aws cloudfront create-invalidation \
 
 ### Nginx Config Location:
 ```
-/etc/nginx/conf.d/echotranslate.conf
+/etc/nginx/conf.d/exbabel.conf
 ```
 
 ### Backend Code Location:
@@ -312,7 +312,7 @@ Add `https://staging.exbabel.com` to allowed origins in `backend/server.js`
 
 3. **Update Nginx config:**
    ```bash
-   sudo nano /etc/nginx/conf.d/echotranslate.conf
+   sudo nano /etc/nginx/conf.d/exbabel.conf
    # Change server_name from api.exbabel.com to backend.exbabel.com
    # Update ssl_certificate paths
    ```
@@ -364,7 +364,7 @@ Add `https://staging.exbabel.com` to allowed origins in `backend/server.js`
 
 5. **Restart backend:**
    ```bash
-   pm2 restart echotranslate-backend
+   pm2 restart exbabel-backend
    ```
 
 ---
@@ -433,8 +433,8 @@ grep -A 10 "cors" ~/exbabel/backend/server.js
 
 **Restart backend:**
 ```bash
-pm2 restart echotranslate-backend
-pm2 logs echotranslate-backend
+pm2 restart exbabel-backend
+pm2 logs exbabel-backend
 ```
 
 **Test API directly:**
@@ -535,11 +535,11 @@ ssh -i your-key.pem ec2-user@98.85.112.245
 
 # Check backend status
 pm2 status
-pm2 logs echotranslate-backend
+pm2 logs exbabel-backend
 
 # Restart services
 sudo systemctl restart nginx
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 
 # Check nginx
 sudo nginx -t
@@ -550,7 +550,7 @@ sudo systemctl status nginx
 
 ## Contact & Support
 
-**Repository:** https://github.com/jkang1643/EchoTranslate  
+**Repository:** https://github.com/jkang1643/Exbabel  
 **AWS Account:** (Your AWS account ID)  
 **Domain Registrar:** (Your domain registrar)  
 **DNS Provider:** AWS Route 53

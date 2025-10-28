@@ -1,6 +1,6 @@
 /**
- * EchoTranslate - Backend Server
- * Copyright (c) 2025 EchoTranslate. All Rights Reserved.
+ * Exbabel - Backend Server
+ * Copyright (c) 2025 Exbabel. All Rights Reserved.
  * 
  * PROPRIETARY AND CONFIDENTIAL
  * 

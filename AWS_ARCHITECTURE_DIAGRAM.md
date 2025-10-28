@@ -1,4 +1,4 @@
-# EchoTranslate AWS Architecture
+# Exbabel AWS Architecture
 
 ## System Architecture Diagram
 

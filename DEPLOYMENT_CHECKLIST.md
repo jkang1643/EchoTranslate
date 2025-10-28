@@ -220,16 +220,16 @@ ssh -i your-key.pem ubuntu@YOUR_EC2_IP
 pm2 status
 
 # View logs
-pm2 logs echotranslate-backend
+pm2 logs exbabel-backend
 
 # Restart backend
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 
 # Update backend
 cd /home/ubuntu/realtimetranslationapp/backend
 git pull
 npm install
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 ```
 
 ### Frontend Deployment

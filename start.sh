@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# EchoTranslate Startup Script
+# Exbabel Startup Script
 
-echo "🚀 Starting EchoTranslate..."
+echo "🚀 Starting Exbabel..."
 
 # Check if .env file exists
 if [ ! -f .env ]; then

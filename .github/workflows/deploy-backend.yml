@@ -1,0 +1,66 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key.pem
+          chmod 600 ~/.ssh/deploy_key.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+            
+            # Navigate to project directory
+            cd /home/ubuntu/realtimetranslationapp
+            
+            # Pull latest changes
+            git fetch origin
+            git reset --hard origin/main
+            
+            # Install/update backend dependencies
+            cd backend
+            npm ci --production
+            
+            # Restart PM2 service
+            pm2 restart exbabel-backend || pm2 start server.js --name exbabel-backend
+            pm2 save
+            
+            echo "✅ Backend deployment completed successfully!"
+          EOF
+      
+      - name: Verify deployment
+        run: |
+          ssh -i ~/.ssh/deploy_key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            pm2 status exbabel-backend
+            pm2 logs exbabel-backend --lines 20 --nostream
+          EOF
+      
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key.pem
+

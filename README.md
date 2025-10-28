@@ -1,4 +1,4 @@
-# EchoTranslate
+# Exbabel
 
 A production-quality web application that performs **real-time speech translation** using the **Google Gemini Realtime API**. The app captures live microphone input, streams it to the Gemini API, and displays translated text with optional audio playback.
 
@@ -139,7 +139,7 @@ The app supports 53+ languages including:
 ## 📁 Project Structure
 
 ```
-echotranslate/
+exbabel/
 ├── backend/
 │   ├── server.js                    # Express + WebSocket server with streaming
 │   └── package.json                 # Backend dependencies

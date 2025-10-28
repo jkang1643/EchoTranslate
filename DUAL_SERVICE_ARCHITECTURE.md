@@ -2,7 +2,7 @@
 
 ## Overview
 
-EchoTranslate has been upgraded from a single-service architecture (OpenAI Realtime API) to a **dual-service architecture** that leverages the strengths of both Google Cloud Speech-to-Text and OpenAI:
+Exbabel has been upgraded from a single-service architecture (OpenAI Realtime API) to a **dual-service architecture** that leverages the strengths of both Google Cloud Speech-to-Text and OpenAI:
 
 ### Previous Architecture
 - **Single Service**: OpenAI Realtime API

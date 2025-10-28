@@ -1,6 +1,6 @@
-# AWS Deployment Guide - EchoTranslate
+# AWS Deployment Guide - Exbabel
 
-This guide will help you deploy EchoTranslate to AWS with:
+This guide will help you deploy Exbabel to AWS with:
 - **Frontend**: S3 + CloudFront (for fast global delivery)
 - **Backend**: EC2 (for WebSocket support)
 
@@ -128,7 +128,7 @@ This allows you to use port 80/443 instead of 3001 and adds SSL support.
 sudo dnf install -y nginx
 
 # Create Nginx configuration
-sudo nano /etc/nginx/conf.d/echotranslate.conf
+sudo nano /etc/nginx/conf.d/exbabel.conf
 ```
 
 Paste this configuration:
@@ -183,7 +183,7 @@ sudo systemctl restart nginx
 cd /home/ec2-user/realtimetranslationapp/backend
 
 # Start application with PM2
-pm2 start server.js --name echotranslate-backend
+pm2 start server.js --name exbabel-backend
 
 # Save PM2 configuration
 pm2 save
@@ -194,7 +194,7 @@ pm2 startup systemd
 
 # Check status
 pm2 status
-pm2 logs echotranslate-backend
+pm2 logs exbabel-backend
 ```
 
 ### Step 1.6: Test Backend
@@ -247,7 +247,7 @@ This creates an optimized build in `frontend/dist/`.
 
 ```bash
 # Set your bucket name (must be globally unique)
-BUCKET_NAME="echotranslate-frontend-$(date +%s)"
+BUCKET_NAME="exbabel-frontend-$(date +%s)"
 
 # Create bucket
 aws s3 mb s3://${BUCKET_NAME} --region us-east-1
@@ -307,8 +307,8 @@ echo "S3 Website URL: http://${BUCKET_NAME}.s3-website-us-east-1.amazonaws.com"
 # Create CloudFront distribution
 cat > /tmp/cloudfront-config.json << EOF
 {
-  "CallerReference": "echotranslate-$(date +%s)",
-  "Comment": "EchoTranslate Frontend Distribution",
+  "CallerReference": "exbabel-$(date +%s)",
+  "Comment": "Exbabel Frontend Distribution",
   "Enabled": true,
   "Origins": {
     "Quantity": 1,
@@ -399,7 +399,7 @@ app.use(cors({
 
 Restart backend:
 ```bash
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 ```
 
 ## Part 3: Custom Domain Setup (Optional)
@@ -480,13 +480,13 @@ ws.onerror = (e) => console.error('Error:', e);
 
 ```bash
 # View logs
-pm2 logs echotranslate-backend
+pm2 logs exbabel-backend
 
 # View status
 pm2 status
 
 # Restart backend
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 
 # View Nginx logs
 sudo tail -f /var/log/nginx/access.log
@@ -523,7 +523,7 @@ git pull
 npm install
 
 # Restart
-pm2 restart echotranslate-backend
+pm2 restart exbabel-backend
 ```
 
 ## Part 6: Cost Optimization
@@ -619,7 +619,7 @@ aws cloudfront create-invalidation \
 
 ```bash
 # Check logs
-pm2 logs echotranslate-backend --lines 100
+pm2 logs exbabel-backend --lines 100
 
 # Check system resources
 htop
@@ -630,16 +630,16 @@ free -h
 ### API Keys Not Working
 
 1. Verify `.env` file exists and has correct values
-2. Restart backend: `pm2 restart echotranslate-backend`
-3. Check environment: `pm2 env echotranslate-backend`
+2. Restart backend: `pm2 restart exbabel-backend`
+3. Check environment: `pm2 env exbabel-backend`
 
 ## Quick Reference Commands
 
 ```bash
 # Backend
 pm2 status
-pm2 logs echotranslate-backend
-pm2 restart echotranslate-backend
+pm2 logs exbabel-backend
+pm2 restart exbabel-backend
 
 # Nginx
 sudo systemctl status nginx
@@ -659,7 +659,7 @@ sudo tail -f /var/log/nginx/error.log
 ## Support
 
 For issues:
-1. Check logs: `pm2 logs echotranslate-backend`
+1. Check logs: `pm2 logs exbabel-backend`
 2. Verify API keys are set correctly
 3. Test backend health: `curl http://<EC2_PUBLIC_IP>/health`
 4. Check AWS CloudWatch for detailed metrics

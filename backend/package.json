@@ -1,7 +1,7 @@
 {
-  "name": "echotranslate-backend",
+  "name": "exbabel-backend",
   "version": "1.0.0",
-  "description": "EchoTranslate Backend - Real-time translation server",
+  "description": "Exbabel Backend - Real-time translation server",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -20,7 +20,7 @@
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
-  "author": "EchoTranslate",
+  "author": "Exbabel",
   "license": "UNLICENSED",
   "private": true
 }

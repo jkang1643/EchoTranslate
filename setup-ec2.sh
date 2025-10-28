@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EchoTranslate - EC2 Initial Setup Script
+# Exbabel - EC2 Initial Setup Script
 # Run this script ONCE on a new EC2 instance to set up everything
 
 set -e  # Exit on error
@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}EchoTranslate EC2 Setup${NC}"
+echo -e "${GREEN}Exbabel EC2 Setup${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # Check if running as root
@@ -125,7 +125,7 @@ fi
 
 # Setup Nginx
 echo -e "\n${YELLOW}🔧 Configuring Nginx...${NC}"
-sudo tee /etc/nginx/sites-available/echotranslate > /dev/null << 'EOF'
+sudo tee /etc/nginx/sites-available/exbabel > /dev/null << 'EOF'
 # WebSocket upgrade headers
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -159,7 +159,7 @@ server {
 EOF
 
 # Enable Nginx site
-sudo ln -sf /etc/nginx/sites-available/echotranslate /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/exbabel /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test Nginx configuration
@@ -192,7 +192,7 @@ echo -e "   ${YELLOW}nano /home/ubuntu/realtimetranslationapp/backend/google-cre
 echo -e ""
 echo -e "3. Start the backend:"
 echo -e "   ${YELLOW}cd /home/ubuntu/realtimetranslationapp/backend${NC}"
-echo -e "   ${YELLOW}pm2 start server.js --name echotranslate-backend${NC}"
+echo -e "   ${YELLOW}pm2 start server.js --name exbabel-backend${NC}"
 echo -e "   ${YELLOW}pm2 save${NC}"
 echo -e ""
 echo -e "4. Test the backend:"

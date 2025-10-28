@@ -1,5 +1,5 @@
 @echo off
-echo 🚀 Starting EchoTranslate...
+echo 🚀 Starting Exbabel...
 
 REM Check if .env file exists
 if not exist .env (

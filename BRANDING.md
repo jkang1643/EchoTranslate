@@ -1,7 +1,7 @@
-# EchoTranslate Branding
+# Exbabel Branding
 
 ## Product Name
-**EchoTranslate** - Real-time voice translation powered by AI
+**Exbabel** - Real-time voice translation powered by AI
 
 ## Tagline
 Real-time speech translation powered by Gemini AI
@@ -12,12 +12,12 @@ Real-time speech translation powered by Gemini AI
 "Echo" represents the reflection and transformation of speech across languages, while "Translate" clearly communicates the core function.
 
 ### Package Names
-- Main package: `echotranslate`
-- Backend package: `echotranslate-backend`
-- Frontend package: `echotranslate-frontend`
+- Main package: `exbabel`
+- Backend package: `exbabel-backend`
+- Frontend package: `exbabel-frontend`
 
 ### Copyright
-Copyright (c) 2025 EchoTranslate. All Rights Reserved.
+Copyright (c) 2025 Exbabel. All Rights Reserved.
 
 ## Visual Identity
 
@@ -48,7 +48,7 @@ Currently using a microphone icon in a gradient background (blue to purple)
 - 🔒 Proprietary technology
 
 ## Legal Protection
-This software is proprietary and confidential. All intellectual property rights, including the name "EchoTranslate", associated branding, technology, and methods are protected by copyright and trade secret law.
+This software is proprietary and confidential. All intellectual property rights, including the name "Exbabel", associated branding, technology, and methods are protected by copyright and trade secret law.
 
 See LICENSE and NOTICE files for complete legal terms.
 

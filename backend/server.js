@@ -1,6 +1,6 @@
 /**
- * EchoTranslate - Backend Server
- * Copyright (c) 2025 EchoTranslate. All Rights Reserved.
+ * Exbabel - Backend Server
+ * Copyright (c) 2025 Exbabel. All Rights Reserved.
  * 
  * PROPRIETARY AND CONFIDENTIAL
  * 
@@ -392,3 +392,4 @@ if (!process.env.GOOGLE_SPEECH_API_KEY && !process.env.GOOGLE_APPLICATION_CREDEN
   console.warn("[Backend] Set either GOOGLE_SPEECH_API_KEY or GOOGLE_APPLICATION_CREDENTIALS");
 }
 console.log("[Backend] =====================================");
+// Test comment

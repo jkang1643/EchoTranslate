@@ -14,7 +14,7 @@ This guide below covers the **service account JSON method** (more secure for pro
 
 ## Architecture Overview
 
-**EchoTranslate now uses a dual-service architecture:**
+**Exbabel now uses a dual-service architecture:**
 
 1. **Google Cloud Speech-to-Text** - For live streaming transcription with partial results
    - Model: Chirp 3 (`latest_long`)
@@ -36,7 +36,7 @@ This guide below covers the **service account JSON method** (more secure for pro
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Click on the project dropdown at the top
 3. Click "New Project"
-4. Enter a project name (e.g., "echotranslate-app")
+4. Enter a project name (e.g., "exbabel-app")
 5. Click "Create"
 
 ## Step 2: Enable the Speech-to-Text API
@@ -50,7 +50,7 @@ This guide below covers the **service account JSON method** (more secure for pro
 
 1. Go to **APIs & Services > Credentials**
 2. Click "Create Credentials" > "Service Account"
-3. Enter a service account name (e.g., "echotranslate-speech")
+3. Enter a service account name (e.g., "exbabel-speech")
 4. Click "Create and Continue"
 5. Grant the role: **"Cloud Speech Client"** or **"Cloud Speech Administrator"**
 6. Click "Continue" then "Done"

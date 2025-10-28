@@ -1,6 +1,6 @@
 # AWS Deployment Files - Quick Reference
 
-This directory contains everything you need to deploy EchoTranslate to AWS. Here's what each file does and how to use it.
+This directory contains everything you need to deploy Exbabel to AWS. Here's what each file does and how to use it.
 
 ## 📚 Documentation Files
 
@@ -78,11 +78,11 @@ deploy-frontend.bat
 
 ### 8. **nginx.conf**
 **Purpose**: Nginx configuration for WebSocket proxy  
-**Location**: Copy to `/etc/nginx/sites-available/echotranslate` on EC2  
+**Location**: Copy to `/etc/nginx/sites-available/exbabel` on EC2  
 **Usage**:
 ```bash
-sudo cp nginx.conf /etc/nginx/sites-available/echotranslate
-sudo ln -s /etc/nginx/sites-available/echotranslate /etc/nginx/sites-enabled/
+sudo cp nginx.conf /etc/nginx/sites-available/exbabel
+sudo ln -s /etc/nginx/sites-available/exbabel /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
 ```
@@ -111,7 +111,7 @@ nano frontend/.env.production  # Add your EC2 IP
 **Usage**:
 ```bash
 aws cloudformation create-stack \
-  --stack-name echotranslate \
+  --stack-name exbabel \
   --template-body file://cloudformation-template.yaml \
   --parameters ParameterKey=KeyPairName,ParameterValue=your-key-pair
 ```
@@ -132,7 +132,7 @@ aws cloudformation create-stack \
    # On EC2
    ./setup-ec2.sh
    # Edit .env with API keys
-   pm2 start server.js --name echotranslate-backend
+   pm2 start server.js --name exbabel-backend
    ```
 4. **Deploy Frontend**:
    ```bash
@@ -223,7 +223,7 @@ If you encounter issues:
 1. Check the troubleshooting section in `AWS_DEPLOYMENT_GUIDE.md`
 2. Verify all prerequisites are met
 3. Check logs:
-   - Backend: `pm2 logs echotranslate-backend`
+   - Backend: `pm2 logs exbabel-backend`
    - Nginx: `sudo tail -f /var/log/nginx/error.log`
 4. Test health endpoint: `curl http://YOUR_EC2_IP/health`
 

@@ -1,6 +1,6 @@
 /**
- * EchoTranslate - Header Component
- * Copyright (c) 2025 EchoTranslate. All Rights Reserved.
+ * Exbabel - Header Component
+ * Copyright (c) 2025 Exbabel. All Rights Reserved.
  */
 
 import React from 'react'
@@ -15,7 +15,7 @@ function Header({ currentPage, setCurrentPage }) {
             <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
               <Mic className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">EchoTranslate</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Exbabel</h1>
           </div>
           
           <nav className="flex space-x-1">

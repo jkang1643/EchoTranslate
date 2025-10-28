@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'EchoTranslate - Automated AWS Deployment Stack (EC2 + S3 + CloudFront)'
+Description: 'Exbabel - Automated AWS Deployment Stack (EC2 + S3 + CloudFront)'
 
 Parameters:
   KeyPairName:
@@ -24,8 +24,36 @@ Parameters:
 
   DomainName:
     Type: String
+    Default: 'exbabel.com'
+    Description: Root domain name (e.g., exbabel.com)
+
+  AppSubdomain:
+    Type: String
+    Default: 'app'
+    Description: Subdomain for the application (e.g., 'app' for app.exbabel.com)
+
+  ApiSubdomain:
+    Type: String
+    Default: 'api'
+    Description: Subdomain for the API backend (e.g., 'api' for api.exbabel.com)
+
+  HostedZoneId:
+    Type: String
     Default: ''
-    Description: (Optional) Custom domain name for CloudFront
+    Description: (Optional) Route 53 Hosted Zone ID for automatic DNS setup. Leave empty to skip DNS configuration.
+
+  ACMCertificateArn:
+    Type: String
+    Default: ''
+    Description: (Optional) ACM Certificate ARN in us-east-1 that covers app subdomain. Leave empty for CloudFront default certificate.
+
+Conditions:
+  HasDomainName: !Not [!Equals [!Ref DomainName, '']]
+  HasACMCertificate: !Not [!Equals [!Ref ACMCertificateArn, '']]
+  HasHostedZone: !Not [!Equals [!Ref HostedZoneId, '']]
+  CreateDNSRecords: !And
+    - !Condition HasDomainName
+    - !Condition HasHostedZone
 
 Resources:
   # ===================================
@@ -35,8 +63,8 @@ Resources:
   BackendSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: echotranslate-backend-sg
-      GroupDescription: Security group for EchoTranslate backend
+      GroupName: exbabel-backend-sg
+      GroupDescription: Security group for Exbabel backend
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -60,7 +88,7 @@ Resources:
           Description: WebSocket access
       Tags:
         - Key: Name
-          Value: echotranslate-backend-sg
+          Value: exbabel-backend-sg
 
   BackendInstance:
     Type: AWS::EC2::Instance
@@ -114,7 +142,7 @@ Resources:
           
       Tags:
         - Key: Name
-          Value: echotranslate-backend
+          Value: exbabel-backend
 
   BackendEIP:
     Type: AWS::EC2::EIP
@@ -122,7 +150,7 @@ Resources:
       InstanceId: !Ref BackendInstance
       Tags:
         - Key: Name
-          Value: echotranslate-backend-eip
+          Value: exbabel-backend-eip
 
   # ===================================
   # S3 Bucket for Frontend
@@ -131,7 +159,7 @@ Resources:
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'echotranslate-frontend-${AWS::AccountId}'
+      BucketName: !Sub 'exbabel-frontend-${AWS::AccountId}'
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: index.html
@@ -142,7 +170,7 @@ Resources:
         RestrictPublicBuckets: false
       Tags:
         - Key: Name
-          Value: echotranslate-frontend
+          Value: exbabel-frontend
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -165,17 +193,18 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: EchoTranslate Frontend Distribution
+        Comment: Exbabel Frontend Distribution
         DefaultRootObject: index.html
+        Aliases:
+          !If
+            - HasDomainName
+            - [!Sub '${AppSubdomain}.${DomainName}']
+            - !Ref AWS::NoValue
         Origins:
           - Id: S3Origin
-            DomainName: !GetAtt FrontendBucket.DomainName
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
             S3OriginConfig:
               OriginAccessIdentity: ''
-            CustomOriginConfig:
-              HTTPPort: 80
-              HTTPSPort: 443
-              OriginProtocolPolicy: http-only
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -195,16 +224,64 @@ Resources:
           DefaultTTL: 86400
           MaxTTL: 31536000
         CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
           - ErrorCode: 404
             ResponseCode: 200
             ResponsePagePath: /index.html
             ErrorCachingMinTTL: 300
         PriceClass: PriceClass_100
         ViewerCertificate:
-          CloudFrontDefaultCertificate: true
+          !If
+            - HasACMCertificate
+            - AcmCertificateArn: !Ref ACMCertificateArn
+              SslSupportMethod: sni-only
+              MinimumProtocolVersion: TLSv1.2_2021
+            - CloudFrontDefaultCertificate: true
       Tags:
         - Key: Name
-          Value: echotranslate-cloudfront
+          Value: exbabel-cloudfront
+
+  # ===================================
+  # Route 53 DNS Records
+  # ===================================
+
+  AppDNSRecordIPv4:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDNSRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub '${AppSubdomain}.${DomainName}'
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (fixed value)
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        EvaluateTargetHealth: false
+
+  AppDNSRecordIPv6:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDNSRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub '${AppSubdomain}.${DomainName}'
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (fixed value)
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        EvaluateTargetHealth: false
+
+  ApiDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDNSRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub '${ApiSubdomain}.${DomainName}'
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - !Ref BackendEIP
 
 Outputs:
   BackendInstanceId:
@@ -251,20 +328,58 @@ Outputs:
 
   BackendAPIURL:
     Description: Backend API URL
-    Value: !Sub 'http://${BackendEIP}'
+    Value: !If
+      - CreateDNSRecords
+      - !Sub 'https://${ApiSubdomain}.${DomainName}'
+      - !Sub 'http://${BackendEIP}'
 
   BackendWebSocketURL:
     Description: Backend WebSocket URL
-    Value: !Sub 'ws://${BackendEIP}/translate'
+    Value: !If
+      - CreateDNSRecords
+      - !Sub 'wss://${ApiSubdomain}.${DomainName}/translate'
+      - !Sub 'ws://${BackendEIP}/translate'
+
+  FrontendURL:
+    Description: Frontend Application URL
+    Value: !If
+      - CreateDNSRecords
+      - !Sub 'https://${AppSubdomain}.${DomainName}'
+      - !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  AppDomainName:
+    Condition: CreateDNSRecords
+    Description: Custom domain for the application
+    Value: !Sub '${AppSubdomain}.${DomainName}'
+
+  ApiDomainName:
+    Condition: CreateDNSRecords
+    Description: Custom domain for the API backend
+    Value: !Sub '${ApiSubdomain}.${DomainName}'
 
   NextSteps:
     Description: Next steps to complete deployment
-    Value: !Sub |
-      1. SSH to EC2: ssh -i ${KeyPairName}.pem ubuntu@${BackendEIP}
-      2. Upload your code to: /home/ubuntu/realtimetranslationapp/
-      3. Create .env file with API keys
-      4. Start backend: pm2 start server.js --name echotranslate-backend
-      5. Build frontend with: VITE_API_URL=http://${BackendEIP} VITE_WS_URL=ws://${BackendEIP}/translate
-      6. Deploy frontend: aws s3 sync frontend/dist/ s3://${FrontendBucket}/ --delete
-      7. Access app at: https://${CloudFrontDistribution.DomainName}
+    Value: !If
+      - CreateDNSRecords
+      - !Sub |
+          1. SSH to EC2: ssh -i ${KeyPairName}.pem ubuntu@${BackendEIP}
+          2. Upload backend code to: /home/ubuntu/realtimetranslationapp/backend/
+          3. Create .env file with API keys (OPENAI_API_KEY, GOOGLE_SPEECH_API_KEY)
+          4. Install dependencies: cd backend && npm install
+          5. Start backend: pm2 start server.js --name exbabel-backend
+          6. Setup SSL for API: sudo certbot certonly --standalone -d ${ApiSubdomain}.${DomainName}
+          7. Configure Nginx as reverse proxy with SSL
+          8. Build frontend with: VITE_API_URL=https://${ApiSubdomain}.${DomainName} VITE_WS_URL=wss://${ApiSubdomain}.${DomainName}/translate
+          9. Deploy frontend: aws s3 sync frontend/dist/ s3://${FrontendBucket}/ --delete
+          10. Invalidate CloudFront: aws cloudfront create-invalidation --distribution-id ${CloudFrontDistribution} --paths "/*"
+          11. Access app at: https://${AppSubdomain}.${DomainName}
+      - !Sub |
+          1. SSH to EC2: ssh -i ${KeyPairName}.pem ubuntu@${BackendEIP}
+          2. Upload backend code to: /home/ubuntu/realtimetranslationapp/backend/
+          3. Create .env file with API keys (OPENAI_API_KEY, GOOGLE_SPEECH_API_KEY)
+          4. Install dependencies: cd backend && npm install
+          5. Start backend: pm2 start server.js --name exbabel-backend
+          6. Build frontend with: VITE_API_URL=http://${BackendEIP} VITE_WS_URL=ws://${BackendEIP}/translate
+          7. Deploy frontend: aws s3 sync frontend/dist/ s3://${FrontendBucket}/ --delete
+          8. Access app at: https://${CloudFrontDistribution.DomainName}
 
