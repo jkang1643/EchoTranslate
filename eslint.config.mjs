@@ -13,7 +13,7 @@ export default defineConfig([
       'dist/**',
       '**/node_modules/**',
       '**/package-lock.json',
-      'frontend/src/index.css'
+      'frontend/**'
     ]
   },
   { 
@@ -23,30 +23,6 @@ export default defineConfig([
     rules: {
       "no-unused-vars": "off",
       "no-undef": "off"
-    }
-  },
-  { 
-    files: ["frontend/src/**/*.{js,jsx}"], 
-    ...pluginReact.configs.flat.recommended,
-    languageOptions: { 
-      globals: { ...globals.browser },
-      parserOptions: {
-        ecmaVersion: 2020,
-        sourceType: "module",
-        ecmaFeatures: { jsx: true }
-      }
-    },
-    settings: {
-      react: {
-        version: "detect"
-      }
-    },
-    rules: {
-      "react/react-in-jsx-scope": "off",
-      "react/prop-types": "off",
-      "no-unused-vars": "off",
-      "react-hooks/exhaustive-deps": "off",
-      "react-hooks/rules-of-hooks": "off"
     }
   },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
