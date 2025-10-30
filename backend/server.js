@@ -292,13 +292,15 @@ app.get('/sessions', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
+    timestamp: new Date().toISOString(),
     activeSessions: activeSessions.size,
     liveTranslationSessions: sessionStore.getAllSessions().length,
     transcriptionProvider: 'Google Cloud Speech-to-Text',
     transcriptionModel: 'Chirp 3 (latest_long)',
     translationProvider: 'OpenAI',
     translationModel: 'gpt-4o',
-    endpoint: '/translate'
+    endpoint: '/translate',
+    message: 'Backend is running and responding to requests!'
   });
 });
 
