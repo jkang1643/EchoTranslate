@@ -1,5 +1,8 @@
+*
+!src
 dist
 node_modules
 *.config.js
 public
+index.html
 
