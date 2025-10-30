@@ -46,6 +46,16 @@ jobs:
             cd backend
             npm ci --production
             
+            # Restore nginx SSL config if it exists (do NOT overwrite if already configured with SSL)
+            if [ -f /etc/letsencrypt/live/api.exbabel.com/fullchain.pem ]; then
+              echo "🔐 SSL certificates detected - restoring nginx SSL config..."
+              sudo cp nginx.conf /etc/nginx/conf.d/exbabel.conf
+              sudo nginx -t && sudo systemctl reload nginx
+              echo "✅ Nginx SSL config restored"
+            else
+              echo "⚠️  No SSL certificates found - skipping nginx config update"
+            fi
+            
             # Restart PM2 service
             pm2 restart exbabel-backend || pm2 start server.js --name exbabel-backend
             pm2 save
