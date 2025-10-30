@@ -11,11 +11,12 @@ export default defineConfig([
       '.claude/**',
       'node_modules/**',
       'dist/**',
-      '**/node_modules/**'
+      '**/node_modules/**',
+      '**/package-lock.json'
     ]
   },
   { files: ["**/*.{js,mjs,cjs,jsx}"], plugins: { js }, extends: ["js/recommended"], languageOptions: { globals: globals.browser } },
-  pluginReact.configs.flat.recommended,
+  { files: ["**/*.{js,mjs,cjs,jsx}"], ...pluginReact.configs.flat.recommended },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
   { files: ["**/*.css"], plugins: { css }, language: "css/css", extends: ["css/recommended"] },
 ]);
