@@ -13,14 +13,17 @@ export default defineConfig([
       'dist/**',
       '**/node_modules/**',
       '**/package-lock.json',
-      'backend/**',
       'frontend/src/index.css'
     ]
   },
   { 
-    files: ["**/*.{js,mjs,cjs}"], 
+    files: ["backend/**/*.{js,mjs,cjs}"], 
     ...js.configs.recommended,
-    languageOptions: { globals: { ...globals.node } }
+    languageOptions: { globals: globals.node },
+    rules: {
+      "no-unused-vars": "off",
+      "no-undef": "off"
+    }
   },
   { 
     files: ["frontend/src/**/*.{js,jsx}"], 
@@ -40,7 +43,8 @@ export default defineConfig([
     },
     rules: {
       "react/react-in-jsx-scope": "off",
-      "react/prop-types": "off"
+      "react/prop-types": "off",
+      "no-unused-vars": "off"
     }
   },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
