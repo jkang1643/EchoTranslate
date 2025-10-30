@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import globals from "globals";
 import pluginReact from "eslint-plugin-react";
+import pluginReactHooks from "eslint-plugin-react-hooks";
 import json from "@eslint/json";
 import css from "@eslint/css";
 import { defineConfig } from "eslint/config";
@@ -28,6 +29,9 @@ export default defineConfig([
   { 
     files: ["frontend/src/**/*.{js,jsx}"], 
     ...pluginReact.configs.flat.recommended,
+    plugins: {
+      "react-hooks": pluginReactHooks
+    },
     languageOptions: { 
       globals: { ...globals.browser },
       parserOptions: {
@@ -44,7 +48,8 @@ export default defineConfig([
     rules: {
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
-      "no-unused-vars": "off"
+      "no-unused-vars": "off",
+      ...pluginReactHooks.configs.recommended.rules
     }
   },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
