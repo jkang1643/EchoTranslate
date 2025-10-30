@@ -12,11 +12,37 @@ export default defineConfig([
       'node_modules/**',
       'dist/**',
       '**/node_modules/**',
-      '**/package-lock.json'
+      '**/package-lock.json',
+      'backend/**',
+      'frontend/src/index.css'
     ]
   },
-  { files: ["**/*.{js,mjs,cjs,jsx}"], plugins: { js }, extends: ["js/recommended"], languageOptions: { globals: globals.browser } },
-  { files: ["**/*.{js,mjs,cjs,jsx}"], ...pluginReact.configs.flat.recommended },
+  { 
+    files: ["**/*.{js,mjs,cjs}"], 
+    ...js.configs.recommended,
+    languageOptions: { globals: { ...globals.node } }
+  },
+  { 
+    files: ["frontend/src/**/*.{js,jsx}"], 
+    ...pluginReact.configs.flat.recommended,
+    languageOptions: { 
+      globals: { ...globals.browser },
+      parserOptions: {
+        ecmaVersion: 2020,
+        sourceType: "module",
+        ecmaFeatures: { jsx: true }
+      }
+    },
+    settings: {
+      react: {
+        version: "detect"
+      }
+    },
+    rules: {
+      "react/react-in-jsx-scope": "off",
+      "react/prop-types": "off"
+    }
+  },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
   { files: ["**/*.css"], plugins: { css }, language: "css/css", extends: ["css/recommended"] },
 ]);
