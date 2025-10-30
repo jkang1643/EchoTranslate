@@ -13,18 +13,11 @@ export default defineConfig([
       'dist/**',
       '**/node_modules/**',
       '**/package-lock.json',
-      'frontend/**'
+      'frontend/**',
+      'backend/**'
     ]
-  },
-  { 
-    files: ["backend/**/*.{js,mjs,cjs}"], 
-    ...js.configs.recommended,
-    languageOptions: { globals: globals.node },
-    rules: {
-      "no-unused-vars": "off",
-      "no-undef": "off"
-    }
   },
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
   { files: ["**/*.css"], plugins: { css }, language: "css/css", extends: ["css/recommended"] },
 ]);
+
