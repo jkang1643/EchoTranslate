@@ -308,7 +308,6 @@ function TranslationInterface({ onBackToHome }) {
       removeHandler()
       disconnect()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleWebSocketMessage])
 
   useEffect(() => {
@@ -327,7 +326,6 @@ function TranslationInterface({ onBackToHome }) {
         console.log('[TranslationInterface] ⚠️ WebSocket state:', connectionState)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionState, sourceLang, targetLang]) // Remove sendMessage from deps to prevent re-render loop
 
   const handleStartListening = async () => {
