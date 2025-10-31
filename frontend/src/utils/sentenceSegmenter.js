@@ -7,8 +7,8 @@
 
 export class SentenceSegmenter {
   constructor(options = {}) {
-    this.maxSentences = options.maxSentences || 3;  // Max sentences in live view
-    this.maxChars = options.maxChars || 500;        // Force flush after this many chars
+    this.maxSentences = options.maxSentences || 10;  // Max sentences in live view (increased from 3 to handle longer text)
+    this.maxChars = options.maxChars || 2000;        // Force flush after this many chars (increased from 500 to handle longer text)
     this.maxTimeMs = options.maxTimeMs || 15000;    // Force flush after 15 seconds
     
     // State

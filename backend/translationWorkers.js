@@ -91,17 +91,34 @@ export class PartialTranslationWorker {
       return text; // Too short to translate
     }
 
-    // For longer text, use more characters in cache key to differentiate
-    // Short text: first 150 chars, Long text (>300): first 300 chars
-    const cacheKeyLength = text.length > 300 ? 300 : 150;
-    const cacheKey = `partial:${sourceLang}:${targetLang}:${text.substring(0, cacheKeyLength)}`;
+    // CRITICAL: For long extending text, cache key must include full text length or suffix
+    // Otherwise cache hits return old truncated translations when text extends
+    // Use full text for cache key for texts > 300 chars to prevent false cache hits
+    let cacheKey;
+    if (text.length > 300) {
+      // For long text, include both prefix AND suffix to catch extensions
+      // This prevents cache hits when text extends beyond the cached version
+      const prefix = text.substring(0, 200);
+      const suffix = text.substring(Math.max(0, text.length - 100));
+      const length = text.length;
+      cacheKey = `partial:${sourceLang}:${targetLang}:${length}:${prefix}:${suffix}`;
+    } else {
+      // For short text, use simple prefix-based key
+      cacheKey = `partial:${sourceLang}:${targetLang}:${text.substring(0, 150)}`;
+    }
     
     // Check cache
     if (this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.CACHE_TTL) {
+      // CRITICAL: Also check if cached text length matches current text length
+      // If text has extended, cache hit is invalid - need new translation
+      if (Date.now() - cached.timestamp < this.CACHE_TTL && cached.text.length >= text.length * 0.9) {
         console.log(`[PartialWorker] ✅ Cache hit for partial`);
         return cached.text;
+      } else if (cached.text.length < text.length * 0.9) {
+        // Text has extended significantly - remove stale cache entry
+        console.log(`[PartialWorker] 🗑️ Cache entry too short (${cached.text.length} vs ${text.length} chars) - invalidating`);
+        this.cache.delete(cacheKey);
       }
     }
 
@@ -113,20 +130,47 @@ export class PartialTranslationWorker {
       return text;
     }
 
-    // Cancel any pending request for this target language (newer text arrived)
+    // For long text, be more careful about canceling - only cancel if clearly reset
+    // For extending text, allow both to complete (previous + new)
     const cancelKey = `${sourceLang}:${targetLang}`;
-    if (this.pendingRequests.has(cancelKey)) {
-      const { abortController } = this.pendingRequests.get(cancelKey);
-      abortController.abort();
-      console.log(`[PartialWorker] 🚫 Cancelled previous partial translation`);
+    
+    // Find any existing pending request for this language pair
+    let existingRequest = null;
+    for (const [key, value] of this.pendingRequests.entries()) {
+      if (key.startsWith(cancelKey)) {
+        existingRequest = { key, ...value };
+        break;
+      }
+    }
+    
+    if (existingRequest) {
+      const { abortController, text: previousText } = existingRequest;
+      
+      // Check if new text is clearly a reset (much shorter) or completely different start
+      // This indicates user started a new sentence/phrase, so cancel old translation
+      const isReset = previousText && (text.length < previousText.length * 0.6 || 
+                                       !text.startsWith(previousText.substring(0, Math.min(previousText.length, 100))));
+      
+      if (isReset) {
+        abortController.abort();
+        this.pendingRequests.delete(existingRequest.key);
+        console.log(`[PartialWorker] 🚫 Cancelled previous translation (text reset: ${previousText.length} → ${text.length} chars)`);
+      } else {
+        // Text is extended - DON'T cancel previous, allow both to complete
+        // Previous shows earlier part, new shows updated full text
+        console.log(`[PartialWorker] ⏳ Text extended (${previousText.length} → ${text.length} chars) - allowing concurrent translations`);
+      }
     }
 
     // Create abort controller for this request
+    // Use timestamp in key for long extending text to allow concurrent translations
+    const uniqueKey = text.length > 500 ? `${cancelKey}_${Date.now()}` : cancelKey;
     const abortController = new AbortController();
-    this.pendingRequests.set(cancelKey, { abortController, text });
+    this.pendingRequests.set(uniqueKey, { abortController, text });
 
     try {
       console.log(`[PartialWorker] ⚡ Fast translating partial: "${text.substring(0, 40)}..." (${sourceLangName} → ${targetLangName})`);
+      console.log(`[PartialWorker] 📝 FULL TEXT INPUT TO API (${text.length} chars): "${text}"`);
 
       // Use GPT-4o-mini for fast partials (faster and cheaper than GPT-4o)
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -155,14 +199,19 @@ RULES FOR PARTIAL/INCOMPLETE TEXT:
             }
           ],
           temperature: 0.2, // Lower temperature for consistency in partials
-          max_tokens: 1000, // Increased from 500 to handle longer partials (prevents truncation)
+          max_tokens: 16000, // Increased significantly to handle very long text passages without truncation
           stream: false // No streaming for partials (simpler)
         }),
         signal: abortController.signal
       });
 
-      // Remove from pending requests
-      this.pendingRequests.delete(cancelKey);
+      // Remove from pending requests (find by abort controller)
+      for (const [key, value] of this.pendingRequests.entries()) {
+        if (value.abortController === abortController) {
+          this.pendingRequests.delete(key);
+          break;
+        }
+      }
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
@@ -176,6 +225,18 @@ RULES FOR PARTIAL/INCOMPLETE TEXT:
       }
 
       const translatedText = result.choices[0].message.content.trim() || text;
+      console.log(`[PartialWorker] ✅ FULL TRANSLATION OUTPUT FROM API (${translatedText.length} chars): "${translatedText}"`);
+      
+      // CRITICAL: Check if response was truncated
+      const finishReason = result.choices[0].finish_reason;
+      if (finishReason === 'length') {
+        console.error(`[PartialWorker] ❌ TRANSLATION TRUNCATED by token limit!`);
+        console.error(`[PartialWorker] Original: ${text.length} chars, Translated: ${translatedText.length} chars`);
+        console.error(`[PartialWorker] Original end: "...${text.substring(Math.max(0, text.length - 150))}"`);
+        console.error(`[PartialWorker] Translated end: "...${translatedText.substring(Math.max(0, translatedText.length - 150))}"`);
+      } else {
+        console.log(`[PartialWorker] ✅ Translation complete (finish_reason: ${finishReason})`);
+      }
 
       // Cache the result
       this.cache.set(cacheKey, {
@@ -192,8 +253,13 @@ RULES FOR PARTIAL/INCOMPLETE TEXT:
 
       return translatedText;
     } catch (error) {
-      // Remove from pending requests
-      this.pendingRequests.delete(cancelKey);
+      // Remove from pending requests (find by abort controller)
+      for (const [key, value] of this.pendingRequests.entries()) {
+        if (value.abortController === abortController) {
+          this.pendingRequests.delete(key);
+          break;
+        }
+      }
 
       if (error.name === 'AbortError') {
         console.log(`[PartialWorker] 🚫 Translation aborted (newer text arrived)`);
@@ -329,7 +395,7 @@ Output: Only the translated text in ${targetLangName}.`
             }
           ],
           temperature: 0.3, // Balanced temperature for quality
-          max_tokens: 2000 // More tokens for complete sentences
+          max_tokens: 16000 // Increased significantly to handle very long final translations without truncation
         })
       });
 
@@ -345,6 +411,15 @@ Output: Only the translated text in ${targetLangName}.`
       }
 
       const translatedText = result.choices[0].message.content.trim() || text;
+      
+      // CRITICAL: Check if response was truncated
+      const finishReason = result.choices[0].finish_reason;
+      if (finishReason === 'length') {
+        console.error(`[FinalWorker] ❌ TRANSLATION TRUNCATED by token limit!`);
+        console.error(`[FinalWorker] Original: ${text.length} chars, Translated: ${translatedText.length} chars`);
+        console.error(`[FinalWorker] Original end: "...${text.substring(Math.max(0, text.length - 150))}"`);
+        console.error(`[FinalWorker] Translated end: "...${translatedText.substring(Math.max(0, translatedText.length - 150))}"`);
+      }
 
       // Cache the result
       this.cache.set(cacheKey, {

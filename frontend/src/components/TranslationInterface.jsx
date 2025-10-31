@@ -105,8 +105,8 @@ function TranslationInterface({ onBackToHome }) {
   
   if (!segmenterRef.current) {
     segmenterRef.current = new SentenceSegmenter({
-      maxSentences: 3,      // Keep max 3 sentences in live view
-      maxChars: 500,        // Force flush after 500 chars
+      maxSentences: 10,     // Increased to allow more sentences in live view (prevents premature flushing)
+      maxChars: 2000,       // Increased to handle longer text (prevents premature flushing after 4 lines)
       maxTimeMs: 15000,     // Force flush after 15 seconds
       onFlush: (flushedSentences) => {
         // Move flushed sentences to history with forced paint
@@ -338,19 +338,26 @@ function TranslationInterface({ onBackToHome }) {
                     clearTimeout(throttleTimerRef.current)
                   }
                   
-                  throttleTimerRef.current = setTimeout(() => {
-                    const latestText = pendingTextRef.current
-                    // Double-check in timeout callback that text is still different
-                    if (latestText !== null && latestText.trim() && 
-                        latestText !== originalText && 
-                        latestText.trim() !== originalText.trim()) {
+                throttleTimerRef.current = setTimeout(() => {
+                  const latestText = pendingTextRef.current
+                  // CRITICAL: Always update if we have text, even if it matches original briefly
+                  // This ensures the last translation update always shows
+                  if (latestText !== null && latestText.trim()) {
+                    // Check if different from original (but don't skip if it's the last update)
+                    const isDifferent = latestText !== originalText && 
+                                        latestText.trim() !== originalText.trim();
+                    
+                    // For long text, always update even if same - might be final translation
+                    const isLongText = latestText.length > 300;
+                    if (isDifferent || isLongText) {
                       lastUpdateTimeRef.current = Date.now()
                       flushSync(() => {
                         setLivePartial(latestText)
                       })
                       console.log(`[TranslationInterface] ⏱️ THROTTLED LIVE PARTIAL (${latestText.length} chars): "${latestText.substring(0, 40)}..."`)
                     }
-                  }, throttleMs)
+                  }
+                }, throttleMs)
                 }
               } else {
                 console.log('[TranslationInterface] ⚠️ Translation equals original, skipping to prevent English glitch', {
@@ -383,15 +390,18 @@ function TranslationInterface({ onBackToHome }) {
                   }
                   throttleTimerRef.current = setTimeout(() => {
                     const latestText = pendingTextRef.current
-                    // Double-check in timeout callback that text is still different
-                    if (latestText !== null && latestText.trim() && 
-                        latestText !== originalText && 
-                        latestText.trim() !== originalText.trim()) {
-                      lastUpdateTimeRef.current = Date.now()
-                      flushSync(() => {
-                        setLivePartial(latestText)
-                      })
-                      console.log(`[TranslationInterface] ⏱️ FALLBACK THROTTLED: "${latestText.substring(0, 40)}..."`)
+                    // CRITICAL: Always update if we have text - ensure last translation shows
+                    if (latestText !== null && latestText.trim()) {
+                      const isDifferent = latestText !== originalText && 
+                                          latestText.trim() !== originalText.trim();
+                      const isLongText = latestText.length > 300;
+                      if (isDifferent || isLongText) {
+                        lastUpdateTimeRef.current = Date.now()
+                        flushSync(() => {
+                          setLivePartial(latestText)
+                        })
+                        console.log(`[TranslationInterface] ⏱️ FALLBACK THROTTLED: "${latestText.substring(0, 40)}..."`)
+                      }
                     }
                   }, 50)
                 }

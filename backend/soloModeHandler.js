@@ -236,12 +236,14 @@ export async function handleSoloMode(clientWs) {
                     // 3. Long text that needs update (different length or content changed)
                     // 4. Very long text - always translate if different (max 300ms delay)
                     // 5. Long text and stale (no translation in 5s) - force retry
-                    const shouldTranslateNow = (timeSinceLastTranslation >= effectiveThrottle || 
+                    // CRITICAL: For long text, translate even if textsAreDifferent is false (might be caught up)
+                    // This ensures continuous updates for long passages
+                    const shouldTranslateNow = timeSinceLastTranslation >= effectiveThrottle || 
                                                textGrewSignificantly || 
                                                longTextNeedsUpdate ||
                                                (isVeryLongText && textsAreDifferent) ||
-                                               (isLongText && isStale && textsAreDifferent)) && 
-                                               textsAreDifferent;
+                                               (isLongText && isStale) ||
+                                               (isLongText && timeSinceLastTranslation >= 2000); // Force update every 2s for long text
                     
                     if (shouldTranslateNow) {
                       // Cancel any pending translation
@@ -257,6 +259,7 @@ export async function handleSoloMode(clientWs) {
                       
                       try {
                         console.log(`[SoloMode] 🔄 Translating partial (${transcriptText.length} chars, throttle: ${adaptiveThrottle}ms): "${transcriptText.substring(0, 40)}..."`);
+                        console.log(`[SoloMode] 📝 FULL TEXT BEING TRANSLATED (${transcriptText.length} chars): "${transcriptText}"`);
                         // Use dedicated partial translation worker (fast, low-latency)
                         const translatedText = await partialTranslationWorker.translatePartial(
                           transcriptText,
@@ -264,6 +267,7 @@ export async function handleSoloMode(clientWs) {
                           currentTargetLang,
                           process.env.OPENAI_API_KEY
                         );
+                        console.log(`[SoloMode] ✅ TRANSLATION RECEIVED (${translatedText.length} chars): "${translatedText}"`);
                         
                         // Validate translation result
                         if (!translatedText || translatedText.trim().length === 0) {
@@ -292,6 +296,7 @@ export async function handleSoloMode(clientWs) {
                       }
                     } else {
                       // Schedule delayed translation with adaptive throttle
+                      // Always cancel and reschedule to ensure we translate the latest text
                       if (pendingPartialTranslation) {
                         clearTimeout(pendingPartialTranslation);
                         pendingPartialTranslation = null;
@@ -302,20 +307,23 @@ export async function handleSoloMode(clientWs) {
                       const delayMs = Math.min(effectiveThrottle, maxDelay);
                       
                       pendingPartialTranslation = setTimeout(async () => {
-                        // Capture LATEST text at timeout execution (not the closure value)
+                        // CRITICAL: Always capture LATEST text at timeout execution
                         const latestText = currentPartialText;
                         if (!latestText || latestText.length < 10) {
                           pendingPartialTranslation = null;
                           return;
                         }
                         
-                        // For long text, always translate even if same as last (content may have changed)
-                        // Only skip if it's definitely the exact same text AND we recently translated it
+                        // For long text, ALWAYS translate regardless of exact match
+                        // This ensures continuous updates throughout long passages
                         const isLongTextNow = latestText.length > 300;
-                        const recentlyTranslated = lastPartialTranslationTime && (Date.now() - lastPartialTranslationTime < 1000);
+                        const veryRecentlyTranslated = lastPartialTranslationTime && (Date.now() - lastPartialTranslationTime < 200);
                         const isExactMatch = latestText === lastPartialTranslation;
                         
-                        if (isExactMatch && (!isLongTextNow || recentlyTranslated)) {
+                        // Only skip if it's short text AND exact match AND very recent (<200ms)
+                        // For long text, always translate to ensure continuous updates
+                        if (isExactMatch && !isLongTextNow && veryRecentlyTranslated) {
+                          console.log(`[SoloMode] ⏭️ Skipping exact match translation (short text, very recent)`);
                           pendingPartialTranslation = null;
                           return;
                         }
@@ -334,7 +342,10 @@ export async function handleSoloMode(clientWs) {
                           if (!translatedText || translatedText.trim().length === 0) {
                             console.warn(`[SoloMode] ⚠️ Delayed translation returned empty for ${latestText.length} char text`);
                             // Don't update lastPartialTranslation if translation failed - allow retry
+                            pendingPartialTranslation = null;
                           } else {
+                            // CRITICAL: Always update tracking and send translation for long text
+                            // This ensures continuous updates throughout the entire passage
                             lastPartialTranslation = latestText;
                             lastPartialTranslationTime = Date.now();
                             
@@ -344,12 +355,11 @@ export async function handleSoloMode(clientWs) {
                               translatedText: translatedText,
                               timestamp: Date.now(),
                               isTranscriptionOnly: false,
-                              hasTranslation: true
+                              hasTranslation: true // Flag that this includes translation
                             }, true);
                             console.log(`[SoloMode] ✅ Sent delayed translation (${translatedText.length} chars) for original (${latestText.length} chars)`);
+                            pendingPartialTranslation = null;
                           }
-                          
-                          pendingPartialTranslation = null;
                         } catch (error) {
                           console.error(`[SoloMode] ❌ Delayed partial translation error (${latestText.length} chars):`, error.message);
                           // Don't update lastPartialTranslation on error - allows retry on next partial
